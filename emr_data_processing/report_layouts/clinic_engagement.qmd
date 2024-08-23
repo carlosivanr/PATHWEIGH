@@ -1,0 +1,122 @@
+---
+format: docx
+params:
+  delivery: "20240326"
+  
+execute: 
+  echo: false
+---
+
+```{r}
+pacman::p_load(here,         # For managing directory paths
+               magrittr,     # For the assignment pipe operator %<>%
+               tidyverse,    # For data manipulation tools
+               install = FALSE)    
+```
+
+```{r}
+clinic_engagement <- read_csv("S:/FM/PATHWEIGH/Quantitative/Projects/working_files/clinic_engagement.csv", col_types = cols())
+```
+
+
+```{r}
+# Set the project root to be used as an input to the load() function
+proj_root <- "S:/FM/PATHWEIGH/Quantitative/Projects/"
+
+# Set the data delivery date to the appropriate data set
+delivery <- params$delivery
+
+# Load visits post id -----------------------------------------------------------
+load(str_c(proj_root, "dataset_", delivery, "/data/processed_visits_post_id_", delivery, ".Rdata"))
+```
+
+
+```{r}
+# Drop any aberrant rows that may have been loaded, but not necessarily part
+  # of the data set of interest.
+  clinic_engagement %<>% 
+    drop_na(DeptNameEpicId)
+  
+  # Update the clinic visit counts in mod_data and merge with clinic_engagement
+  clinic_engagement %<>%
+    select(DepartmentEpicId:Engagement)
+  
+  # Get the Cohort values to join in to clinic engagement for grouping
+  cohort_vals <- visits_post_id %>%
+    select(DepartmentEpicId, Cohort) %>%
+    distinct() %>%
+    filter(DepartmentEpicId %in% clinic_engagement$DepartmentEpicId)
+  
+  # Join cohort values
+  clinic_engagement %<>%
+    left_join(., cohort_vals, by = "DepartmentEpicId")
+```
+
+
+```{r}
+# Number of clinics per cohort
+cohort_n <- clinic_engagement %>%
+  group_by(Cohort) %>%
+  count() %>%
+  mutate(Cohort_n = str_c(Cohort, ": n = ", n))
+
+# Histogram of the engagement values
+  # clinic_engagement %>%
+  #   left_join(., cohort_n, by = "Cohort") %>%
+  #   ggplot(., aes(Engagement)) +
+  #   geom_bar() +
+  #   facet_wrap(~Cohort_n) +
+  #   theme_minimal() +
+  #   labs(y = "Number of clinics",
+  #        x = "Engagement score")
+```
+
+
+```{r}
+# Histogram as percentages
+hist <- clinic_engagement %>%
+    left_join(., cohort_n, by = "Cohort") %>%
+    select(Engagement, Cohort_n) %>%
+    mutate(Engagement = factor(Engagement),
+           Cohort = factor(Cohort_n))
+```
+
+
+```{r}
+# 
+# # This version works for counts but does not show percentages
+# hist %>%
+#     # group_by(Cohort)
+#     ggplot(., aes(Engagement, fill = Cohort)) +
+#     geom_bar(position = position_dodge2(preserve = "single"))
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+# Calculate percentage with the total number of clinics 
+hist %>%
+  ggplot(., aes(Engagement, fill = Cohort)) +
+  geom_bar(aes(y = (..count..)/sum(..count..)),
+           position = position_dodge2(preserve = "single")) +
+  scale_y_continuous(labels = scales::label_percent()) +
+  theme_minimal() +
+  ylab("Percent of all clinics") +
+  scale_fill_brewer(palette="Set2")
+```
+Caption: Engagement scores defined as the sum (0 -8) of a binary indicator of several measures of engagement. Measures of engagement include 1) Zoom intro meeting, 2) In-person clinic visit from a member of the PATHWEIGH team, 3) Requested support from PATHWEIGH clinical team, 4) Used PATHWEIGH e-Learning module, 5) WOF training, 6) use of PATHWEIGH Placard, 7) Attended learning community, 8) Chose practice champion.
+
+```{r, warning=FALSE, message=FALSE}
+# Calculate percentage where the denominator is total in each respective cohort
+hist %>%
+  group_by(Cohort, Engagement) %>%
+  summarise(n = n()) %>%
+  mutate(freq = n / sum(n)) %>%
+  ggplot(., aes(x = Engagement, y=freq, fill=Cohort)) + 
+  geom_bar(stat="identity",position=position_dodge2(preserve = "single")) + 
+  scale_y_continuous(labels = scales::label_percent()) +
+  theme_minimal() +
+  ylab("Percentage of clinics within cohort") +
+  scale_fill_brewer(palette="Set2")
+
+```
+Caption: Engagement scores defined as the sum (0 -8) of a binary indicator of several measures of engagement. Measures of engagement include 1) Zoom intro meeting, 2) In-person clinic visit from a member of the PATHWEIGH team, 3) Requested support from PATHWEIGH clinical team, 4) Used PATHWEIGH e-Learning module, 5) WOF training, 6) use of PATHWEIGH Placard, 7) Attended learning community, 8) Chose practice champion.

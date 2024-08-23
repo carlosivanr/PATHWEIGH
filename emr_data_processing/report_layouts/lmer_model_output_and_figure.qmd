@@ -1,0 +1,301 @@
+---
+format: docx
+params:
+  delivery: "20240326"
+  
+execute: 
+  echo: false
+  warning: false
+  message: false
+---
+
+
+```{r, eval = FALSE}
+################################################################################
+# Carlos Rodriguez, PhD. CU Anschutz Dept. of Fam. Medicine
+# lmer model output and figure
+# This .qmd document was drafted to produce a figure and table of model 
+# parameters for the primary aim of the PATHWEIGH study.
+# Questions for Carter
+# 1. Specification of lmer with binary variables for Age bc it has three levels
+#   - Same for other categories such as Race/Ethnicity, Yeart at index
+# 2. predict() function designed for lm() not for lmer()
+# 3. degrees of freedom for lmerTest is Satterwaithe and is default
+# 4. Use lmerTest() for model, but lme4::predict() for predicted values
+# 5. Why use N_days_post_id? Why not N_months_post_id?
+# 6. prediction intervals?
+################################################################################
+```
+
+
+```{r}
+pacman::p_load(here,         # For managing directory paths
+               magrittr,     # For the assignment pipe operator %<>%
+               tidyverse,    # For data manipulation tools
+               install = FALSE)    
+```
+
+```{r}
+#| echo: false
+
+# Set the project root
+proj_root <- "S:/FM/PATHWEIGH/Quantitative/Projects/"
+
+# Set the data delivery date to the appropriate data set
+delivery <- params$delivery
+
+# Load ee model data -----------------------------------------------------------
+load(str_c(proj_root, "dataset_", delivery, "/data/mod_data_ee_", delivery, ".Rdata"))
+
+# Filter ee data to 18 months
+ee %<>%
+  filter(N_months_post_id <= 18)
+```
+
+```{r}
+# Convert all categorical variables to sets of binary variables
+ee %<>%
+  mutate(age_lt_45 = ifelse(Age_cat == "<=45", 1, 0),
+         age_45_to_60 = ifelse(Age_cat == "45-60", 1, 0),
+         age_gt_60 = ifelse(Age_cat == ">60", 1, 0),
+         sex_m = ifelse(Sex == "Male", 1, 0),
+         sex_f = ifelse(Sex == "Female", 1, 0),
+         reth_nhw = ifelse(Race_Ethnicity == "Non-Hispanic White", 1, 0),
+         reth_his = ifelse(Race_Ethnicity == "Hispanic or Latino", 1, 0),
+         reth_blk = ifelse(Race_Ethnicity == "Black or African American", 1, 0),
+         reth_asn = ifelse(Race_Ethnicity == "Asian", 1, 0),
+         reth_oth = ifelse(Race_Ethnicity == "Other", 1, 0),
+         reth_ukn = ifelse(Race_Ethnicity == "Unknown", 1, 0),
+         year_at_ind0 = ifelse(Year_at_ind == "Year0", 1, 0),
+         year_at_ind1 = ifelse(Year_at_ind == "Year1", 1, 0),
+         year_at_ind2 = ifelse(Year_at_ind == "Year2", 1, 0),
+         year_at_ind3 = ifelse(Year_at_ind == "Year3", 1, 0))
+```
+
+```{r}
+# Linear mixed model with binary variables
+lmer_mod_bin <- lmerTest::lmer(Weight_dv ~ 
+                   
+          # age
+          age_45_to_60 + age_gt_60 + 
+           
+          # sex
+          sex_m + 
+          
+          # race ethnicity
+          reth_his + reth_blk + reth_asn + reth_oth + reth_ukn + 
+           
+          # year at index
+          year_at_ind1 + year_at_ind2 + year_at_ind3 + 
+           
+          # Weight at baseline
+          Weight_bl + slope1 +
+             
+          # 1 - control phase
+          slope1:N_days_post_id + slope1:N_days_post_180 + 
+          
+          # 2 - intervention phase
+          slope2:N_days_post_id + slope2:N_days_post_180 + 
+          
+          # Clustering, convergence issues with both dept and personid   
+          # (1| DepartmentExternalName) + (1| Arb_PersonId),
+          (1| Arb_PersonId),
+                
+          # Input data frame
+          data=ee)
+```
+
+```{r}
+predicted_vals_bin <- predict(lmer_mod_bin, ee, re.form=NA, type="response")
+
+#  
+bind_cols(ee, predicted_vals_bin) %>%
+  mutate(predicted = predicted_vals_bin, # changes in this version compared to the dev .qmd document
+         observed = Weight_kgs) %>%
+  select(Phase, N_months_post_id, observed, predicted) %>%
+  group_by(Phase, N_months_post_id) %>%
+  summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
+  mutate(Phase = case_match(Phase, 0 ~ "Control",
+                            1 ~ "Intervention")) %>%
+  pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~Phase) +
+  theme_minimal() +
+  theme(legend.position="bottom")
+```
+
+```{r}
+model_output <- broom.mixed::tidy(lmer_mod_bin)
+
+# write_csv(x = model_output, here("lmer_model_output.csv"))
+```
+
+```{r}
+term <- c("age_lt_45",
+  "sex_f",
+  "reth_nhw",
+  "year_at_ind0")
+
+model_terms <- model_output %>% pull(term)
+
+# Set the order of the terms to organize them
+ordered_terms <- c(
+  model_terms[1],
+  term[1],
+  model_terms[2:3],
+  term[2],
+  model_terms[4],
+  term[3],
+  model_terms[5:9],
+  term[4],
+  model_terms[10:20]
+)
+
+# Create the main table
+tab <- bind_rows(model_output, 
+          (data.frame(term) %>% 
+             mutate(effect = "fixed"))) %>%
+  arrange((factor(term, levels = ordered_terms))) %>%
+  select(-effect, -group, -statistic, -df) %>% # remove columns
+  filter(!term %in% c("sd__(Intercept)", "sd__Observation")) %>% # remove rows
+  mutate(estimate = ifelse(term %in% c("slope1:N_days_post_id", 
+                                       "slope1:N_days_post_180", 
+                                       "N_days_post_id:slope2", 
+                                       "N_days_post_180:slope2"), 
+                           estimate * 30, estimate)) %>% # convert the estimate for N_days_* to N_months_*
+  mutate(std.error = ifelse(term %in% c("slope1:N_days_post_id", 
+                                        "slope1:N_days_post_180", 
+                                        "N_days_post_id:slope2", 
+                                        "N_days_post_180:slope2"), 
+                            std.error * 30, std.error)) %>%
+mutate(across(estimate:p.value, ~round(., 3))) %>% # round values
+
+  mutate(term = str_replace(term, "N_days_post_id", "N_months_post_id"),
+         term = str_replace(term, "N_days_post_180", "N_months_post_180"),
+         term = str_replace(term, "slope1", "Intr"),
+         term = str_replace(term, "slope2", "Ctrl")) %>% # convert term N_days_* to N_months_*, slope2 to control and slope1 to intervention
+  mutate(term = case_when(
+    term == "age_lt_45" ~ "<45",
+    term == "age_45_to_60" ~ "[45, 60)",
+    term == "age_gt_60" ~ ">60",
+    term == "sex_f" ~ "Female",
+    term == "sex_m" ~ "Male",
+    term == "reth_nhw" ~ "NonHispanicWhite",
+    term == "reth_his" ~ "Hispanic",
+    term == "reth_blk" ~ "Black",
+    term == "reth_asn" ~ "Asian",
+    term == "reth_oth" ~ "Other",
+    term == "reth_ukn" ~ "Unknown",
+    term == "year_at_ind0" ~ "0",
+    term == "year_at_ind1" ~ "1",
+    term == "year_at_ind2" ~ "2",
+    term == "year_at_ind3" ~ "3",
+    term == "Weight_bl" ~ "Weight_bl (kg)",
+    term == "Intr" ~ "Intervention",
+    .default = term))
+```
+
+
+```{r}
+# Add grouping rows for the following terms
+# deliniations <- c("Age", "Gender", "Race/Ethnicity", "Year at Index", "Weight_bl (kg)", "Intr:N_months_post_id")
+
+tab %>%
+  mutate(across(estimate:std.error, ~ as.character(.))) %>%
+  mutate(across(p.value, ~sprintf("%.3f", .))) %>% # Converting to character, but preserve the trailing zeros
+  gt::gt(rowname_col = "term") %>%
+  gt::rows_add(
+    term = "Age",
+    estimate = "",
+    std.error = "",
+    p.value = "    ",
+    .after = "(Intercept)"
+  ) %>%
+  gt::rows_add(
+    term = "Gender",
+    estimate = "",
+    std.error = "",
+    p.value = "",
+    .before = "Female") %>%
+  gt::rows_add(
+    term = "Race/Ethnicity",
+    estimate = "",
+    std.error = "",
+    p.value = "",
+    .after = "Male") %>%
+  gt::rows_add(
+    term = "Year at Index",
+    estimate = "",
+    std.error = "",
+    p.value = "",
+    .before = "0") %>%
+  # gt::tab_style(
+  #   style = gt::cell_borders(sides = "top"),
+  #   locations = list(gt::cells_body(rows = deliniations),
+  #                    gt::cells_stub(rows = deliniations))) %>%
+  gt::tab_header(
+    title = "Regression Coefficients Estimates and Pvalues from linear mixed models for weight during follow-up.",
+    # subtitle = "subtitle place holder"
+  )
+```
+
+```{r, eval = FALSE}
+# n.sims set to 100 for trouble shooting
+# produces error/warning recursive default argument/stack imbalance respectively
+pred_intervals <- merTools::predictInterval(merMod = lmer_mod_bin, newdata = ee,
+                        level = 0.95, n.sims = 3,
+                        stat = "median", type="linear.prediction",
+                        include.resid.var = TRUE)
+```
+
+```{r}
+# To plot intervals
+# bind_cols, pred_intervals with N_months_post_id, and N_months_post_180???
+
+# ggplot(aes(x=1:30, y=fit, ymin=lwr, ymax=upr), data=PI[1:30,]) +
+#   geom_point() +
+#   geom_linerange() +
+#   labs(x="Index", y="Prediction w/ 95% PI") + theme_bw()
+```
+
+<!-- # LMER with categorical variables -->
+<!-- ```{r} -->
+
+<!-- # LMER clustered on department external name and patient id -->
+<!-- lmer_mod <- lme4::lmer(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + slope1 + -->
+<!--           # 1 - -->
+<!--           slope1:N_days_post_id + slope1:N_days_post_180 +  -->
+
+<!--           # 2 -  -->
+<!--           slope2:N_days_post_id + slope2:N_days_post_180 +  -->
+
+<!--           # Random effects, dept name causes convergence warnings    -->
+<!--           # (1| DepartmentExternalName) + (1| Arb_PersonId), -->
+<!--           (1| Arb_PersonId), -->
+
+<!--           # Input data frame -->
+<!--           data=ee) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- predicted_vals <- predict(lmer_mod, ee, re.form=NA, type="response") -->
+
+<!-- #   -->
+<!-- bind_cols(ee, predicted_vals) %>% -->
+<!--   rename(predicted = `...115`, # changes in this version compared to the dev .qmd document -->
+<!--          observed = Weight_kgs) %>% -->
+<!--   select(Phase, N_months_post_id, observed, predicted) %>% -->
+<!--   group_by(Phase, N_months_post_id) %>% -->
+<!--   summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>% -->
+<!--   mutate(Phase = case_match(Phase, 0 ~ "Control", -->
+<!--                             1 ~ "Intervention")) %>% -->
+<!--   pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>% -->
+<!--   ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type)) + -->
+<!--   geom_line() + -->
+<!--   geom_point() + -->
+<!--   facet_wrap(~Phase) + -->
+<!--   theme_minimal() + -->
+<!--   theme(legend.position="bottom") -->
+<!-- ``` -->

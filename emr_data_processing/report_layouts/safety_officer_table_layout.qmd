@@ -1,0 +1,294 @@
+---
+title: "PATHWEIGH - Safety Officer Table"
+subtitle: "`r Sys.Date()`"
+format:
+  html:
+    embed-resources: true
+params:
+  data: "20240326.RData"
+---
+
+```{r, echo = FALSE}
+pacman::p_load(here,         # For managing directory paths
+               tidyverse,    # For data manipulation tools
+               gtsummary,
+               flextable,
+               install = FALSE)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.width = 7, dpi = 300)
+#fig.height = 3.75
+```
+
+```{r}
+#Set Start and End dates
+end_date <- as.Date(lubridate::ymd(substr(params$data, 1, 8)))
+start_date <- end_date-365
+
+```
+
+
+All data are captured from the time period of `r start_date` and `r end_date`.
+
+Intervention status: Intervention status is defined by the patient's last available visit in the data set.
+
+Vitals: Blood pressure, respiratory rate, heart rate, and temperature values were taken from the patient's last available visit.
+
+Labs & O2CPAP/BIPAP: Lab values and were captured from the last available value within the defined time period.
+
+Patients were considered a O2/CPAP/BIPAP user if they had a documented order within the defined time period.
+
+Continuous measures: Percent difference is reported as the change in mean values, (Intervention mean - Control mean)/(Control mean)\*100. A difference of greater than 30% difference is considered a significant difference between the two groups (does not apply to data deliveries beyond 10/10/2023).
+
+Count measures: Percent difference is reported as change in number of patients with evidence of O2/BPAP/BIPAP order, death, or hospitalization (does not apply to data deliveries beyond 10/10/2023).
+
+
+```{r functions, echo = FALSE}
+# Percent difference for continuous measures
+perc_diff_continuous <- function(data, variable, by, ...) {
+  vals <- t.test(data[[variable]]~as.factor(data[[by]]))$estimate
+  d <- diff(vals)
+  perc <- round(d/vals[1]*100,1)
+  str_glue("{perc}%")
+}
+
+# Percent difference for count measures
+perc_diff_count <- function(data, variable, ...){
+  temp <- select(data, Intervention, all_of(variable))
+  temp <- temp %>%
+    group_by(Intervention) %>%
+    summarise(total = n(),
+              var = sum(eval(parse(text = variable)), na.rm= TRUE)) %>%
+    mutate(perc = var/total * 100,
+           diff = perc-lag(perc,default=first(perc)))
+  val <- round(temp$diff[2],1)
+  str_glue("{val}%")
+}
+
+# Count
+sum_fun <- function(data, variable, ...){
+  temp <- select(data, Intervention, all_of(variable))
+  temp <- temp %>%
+    group_by(Intervention) %>%
+    summarise(total = n(),
+              var = sum(eval(parse(text = variable)), na.rm= TRUE)) %>%
+    mutate(perc = var/total * 1000)
+  val <- round(temp$diff[2],1)
+  str_glue("{val}%")
+}
+
+# Set flextable defaults for all tables
+set_flextable_defaults(font.size = 10,
+                       padding = 2,
+                       theme_fun = "theme_vanilla",
+                       table.layout="autofit")
+
+use_df_printer()
+```
+
+```{r, echo=FALSE}
+# Set the path to the emr_data_processing directory to load scripts/functions
+data_delivery_date <- str_remove(params$data, ".RData")
+proj_root_dir <- str_c("dataset_", data_delivery_date)
+proj_parent_dir <- str_remove(here(), "emr_data_processing")
+```
+
+```{r, echo = FALSE}
+# print(data_delivery_date)
+
+# print(proj_root_dir)
+
+# print(proj_parent_dir)
+```
+
+```{r, echo = FALSE}
+# The path will be relative to emr_data_processing with here()
+file_path <- str_c(proj_parent_dir, proj_root_dir, "/data/", "sot_", params$data)
+
+# print(file_path)
+```
+
+```{r, echo = FALSE}
+load(file_path)
+
+# For Troubleshooting
+# load(here("data/sot_20231010.RData"))
+```
+
+
+```{r, echo = FALSE}
+
+#The `echo: false` option disables the printing of code (only output is displayed).
+if (params$data == "20240326.RData"){
+  t1 <- sot %>%
+    select(Intervention,
+           Systolic_blood_pressure:Temperature,
+           A1C:eGFR,
+           O2CPAPBIPAP,
+           death,
+           any_hosp) %>%
+    mutate(Intervention = recode(Intervention,
+                                 `0` = "Control (2022-03-17 to 2023-03-16)",
+                                 `1` = str_c("Intervention (2023-03-17 to ", end_date, ")"))) %>%
+    tbl_summary(by = Intervention,
+                digits = everything() ~ 2,
+                missing = "no",
+                label = list(c(Systolic_blood_pressure) ~ "Systolic BP",
+                             c(Diastolic_blood_pressure) ~ "Diastolic BP",
+                             c(HeartRate) ~ "Heart rate",
+                             c(Respiratoryrate) ~ "Respiratory rate",
+                             c(O2CPAPBIPAP) ~ "O2/CPAP/BIPAP user",
+                             c(death) ~ "Deaths",
+                             c(any_hosp) ~ "Patients with any hospitalization"),
+                type = list(c(Systolic_blood_pressure,
+                           Diastolic_blood_pressure,
+                           HeartRate,
+                           Respiratoryrate,
+                           Temperature,
+                           A1C,
+                           ALT,
+                           AST,
+                           "Cystatin C",
+                           eGFR) ~ "continuous"),
+                statistic = list(c(Systolic_blood_pressure,
+                                   Diastolic_blood_pressure,
+                                   HeartRate,
+                                   Respiratoryrate,
+                                   Temperature,
+                                   A1C,
+                                   ALT,
+                                   AST,
+                                   "Cystatin C",
+                                   eGFR) ~ c("{mean} ({sd})"))) %>%
+    add_stat(fns = list(c(Systolic_blood_pressure,
+                          Diastolic_blood_pressure,
+                          HeartRate,
+                          Respiratoryrate,
+                          Temperature,
+                          A1C,
+                          ALT,
+                          AST,
+                          "Cystatin C",
+                          eGFR) ~ perc_diff_continuous,
+                        c(O2CPAPBIPAP,
+                          death,
+                          any_hosp) ~ perc_diff_count)) %>%
+    modify_header(add_stat_1 ~ "**% Diff**") %>%
+    add_n() %>%
+    bold_labels()
+  
+  
+  
+} else {
+  t1 <- sot %>%
+    select(Intervention,
+           Systolic_blood_pressure:Temperature,
+           A1C:eGFR,
+           O2CPAPBIPAP,
+           death,
+           any_hosp) %>%
+    mutate(Intervention = recode(Intervention,
+                                 `0` = "Control",
+                                 `1` = "Intervention")) %>%
+    tbl_summary(by = Intervention,
+                digits = everything() ~ 2,
+                missing = "no",
+                label = list(c(Systolic_blood_pressure) ~ "Systolic BP",
+                             c(Diastolic_blood_pressure) ~ "Diastolic BP",
+                             c(HeartRate) ~ "Heart rate",
+                             c(Respiratoryrate) ~ "Respiratory rate",
+                             c(O2CPAPBIPAP) ~ "O2/CPAP/BIPAP user",
+                             c(death) ~ "Deaths",
+                             c(any_hosp) ~ "Patients with any hospitalization"),
+                type = list(c(Systolic_blood_pressure,
+                           Diastolic_blood_pressure,
+                           HeartRate,
+                           Respiratoryrate,
+                           Temperature,
+                           A1C,
+                           ALT,
+                           AST,
+                           "Cystatin C",
+                           eGFR) ~ "continuous"),
+                statistic = list(c(Systolic_blood_pressure,
+                                   Diastolic_blood_pressure,
+                                   HeartRate,
+                                   Respiratoryrate,
+                                   Temperature,
+                                   A1C,
+                                   ALT,
+                                   AST,
+                                   "Cystatin C",
+                                   eGFR) ~ c("{mean} ({sd})"))) %>%
+    add_stat(fns = list(c(Systolic_blood_pressure,
+                          Diastolic_blood_pressure,
+                          HeartRate,
+                          Respiratoryrate,
+                          Temperature,
+                          A1C,
+                          ALT,
+                          AST,
+                          "Cystatin C",
+                          eGFR) ~ perc_diff_continuous,
+                        c(O2CPAPBIPAP,
+                          death,
+                          any_hosp) ~ perc_diff_count)) %>%
+    modify_header(add_stat_1 ~ "**% Diff**") %>%
+    add_n() %>%
+    bold_labels()
+}
+```
+
+```{r}
+
+# Function to calculate the average number of hospitalizations per 1,000 patients
+
+my_stats <- function(data, ...) {
+  marker_sum <- sum(data$n_hospitalizations, na.rm = TRUE)
+  marker_perc <- marker_sum / dim(data)[1] * 1000
+  dplyr::tibble(
+    marker_sum = marker_perc
+  )
+}
+
+# Test the output of my_stats
+
+#my_stats(sot)
+if (params$data == "20240326.RData"){
+  t2 <-
+    sot %>%
+    select(n_hospitalizations) %>%
+    tbl_custom_summary(stat_fns = list(c(n_hospitalizations) ~ my_stats),
+                       statistic = list(c(n_hospitalizations) ~ "{marker_sum}"),
+                       label = list(n_hospitalizations ~ "Average number of days hospitalized per 1000 patients")) %>%
+    # add_stat(fns = list(c(n_hospitalizations) ~ perc_diff_continuous)) %>%
+    # modify_header(add_stat_1 ~ "**% Diff**") %>%
+    add_n() %>%
+    bold_labels()
+  
+  }else{
+    
+  t2 <-
+    sot %>%
+    select(Intervention,
+           n_hospitalizations) %>%
+    mutate(Intervention = recode(Intervention,
+                                 `0` = "Control",
+                                 `1` = "Intervention")) %>%
+    tbl_custom_summary(by = Intervention,
+                       stat_fns = list(c(n_hospitalizations) ~ my_stats),
+                       statistic = list(c(n_hospitalizations) ~ "{marker_sum}"),
+                       label = list(n_hospitalizations ~ "Average number of days hospitalized per 1000 patients")) %>%
+    add_stat(fns = list(c(n_hospitalizations) ~ perc_diff_continuous)) %>%
+    modify_header(add_stat_1 ~ "**% Diff**") %>%
+    add_n() %>%
+    bold_labels()
+  }
+```
+
+```{r}
+# Stack tables
+tbl_stack(list(t1, t2))
+```
+

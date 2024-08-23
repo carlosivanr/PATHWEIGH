@@ -1,0 +1,310 @@
+---
+format: docx
+fig-dpi: 600    
+fig-width: 6.5
+fig-height: 5.5
+params:
+  delivery: "20240326"
+  
+execute: 
+  echo: false
+  warning: false
+  message: false
+---
+
+
+```{r, eval = FALSE}
+################################################################################
+# Carlos Rodriguez, PhD. CU Anschutz Dept. of Fam. Medicine
+# per protocol lmer model output and figure
+
+################################################################################
+```
+
+
+```{r}
+pacman::p_load(here,         # For managing directory paths
+               magrittr,     # For the assignment pipe operator %<>%
+               tidyverse,    # For data manipulation tools
+               install = FALSE)    
+```
+
+```{r}
+# Set the project root
+proj_root <- "S:/FM/PATHWEIGH/Quantitative/Projects/"
+
+# Set the data delivery date to the appropriate data set
+delivery <- params$delivery
+
+# Load pp_mod_data
+load(str_c(proj_root, "dataset_", delivery, "/data/pp_mod_data_", delivery, ".Rdata"))
+```
+
+```{r}
+# Redefine slope 1, slope 2, slope 3 in pp_mod_data since thes variables came 
+# from the loaded ee modeling dataset
+pp_mod_data %<>%
+  mutate(slope1 = ifelse(Intervention == "Control", 1, 0),
+         slope2 = ifelse(pw == 1 & Intervention == "Intervention", 1, 0),
+         slope3 = ifelse(pw == 0 & Intervention == "Intervention", 1, 0),
+         )
+```
+
+```{r}
+# Create binary variables
+pp_mod_data %<>% 
+  mutate(age_lt_45 = ifelse(Age_cat == "<=45", 1, 0),
+         age_45_to_60 = ifelse(Age_cat == "45-60", 1, 0),
+         age_gt_60 = ifelse(Age_cat == ">60", 1, 0),
+         sex_m = ifelse(Sex == "Male", 1, 0),
+         sex_f = ifelse(Sex == "Female", 1, 0),
+         reth_nhw = ifelse(Race_Ethnicity == "Non-Hispanic White", 1, 0),
+         reth_his = ifelse(Race_Ethnicity == "Hispanic or Latino", 1, 0),
+         reth_blk = ifelse(Race_Ethnicity == "Black or African American", 1, 0),
+         reth_asn = ifelse(Race_Ethnicity == "Asian", 1, 0),
+         reth_oth = ifelse(Race_Ethnicity == "Other", 1, 0),
+         reth_ukn = ifelse(Race_Ethnicity == "Unknown", 1, 0),
+         year_at_ind0 = ifelse(Year_at_ind == "Year0", 1, 0),
+         year_at_ind1 = ifelse(Year_at_ind == "Year1", 1, 0),
+         year_at_ind2 = ifelse(Year_at_ind == "Year2", 1, 0),
+         year_at_ind3 = ifelse(Year_at_ind == "Year3", 1, 0))
+```
+
+```{r, echo = FALSE, eval = FALSE}
+# PP model with patients that have both control and intervention visits (7,578 patients)
+
+lmer_mod <- lmerTest::lmer(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + slope1 +
+          # 1 - Control group
+          slope1:N_days_post_id + slope1:N_days_post_180 + 
+          
+          # 2 - Intervention group w PW tools
+          slope2:N_days_post_id + slope2:N_days_post_180 + 
+            
+          # 3 - Intervention group no PW tools
+          slope3:N_days_post_id + slope3:N_days_post_180 + 
+          
+          # Random effects, dept name causes convergence warnings   
+          # (1| DepartmentExternalName) + (1| Arb_PersonId),
+          (1|Arb_PersonId),
+                
+          # Input data frame
+          data=pp_mod_data)
+
+broom.mixed::tidy(lmer_mod)
+```
+
+```{r}
+# Linear mixed model with binary variables
+lmer_mod_bin <- lmerTest::lmer(Weight_dv ~ 
+                   
+          # age
+          age_45_to_60 + age_gt_60 + 
+           
+          # sex
+          sex_m + 
+          
+          # race ethnicity
+          reth_his + reth_blk + reth_asn + reth_oth + reth_ukn + 
+           
+          # year at index
+          year_at_ind1 + year_at_ind2 + year_at_ind3 + 
+           
+          # Weight at baseline
+          Weight_bl + slope1 +
+             
+          # Slope1 is the same as Phase/Intervention group
+          slope1:N_days_post_id + slope1:N_days_post_180 + 
+          
+          # Slope2 is a flag for those with any pathweigh tool in intervention
+          slope2:N_days_post_id + slope2:N_days_post_180 +
+          
+          # Slope3 is a flag for those without pathweight tool in intervention 
+          slope3:N_days_post_id + slope3:N_days_post_180 +
+          
+          # Clustering  
+          (1| Arb_PersonId),
+                
+          # Input data frame
+          data=pp_mod_data)
+
+# Display model output
+# broom.mixed::tidy(lmer_mod_bin)
+```
+
+```{r}
+# Create figure of observed vs predicted values
+predicted <- predict(lmer_mod_bin, pp_mod_data, re.form=NA, type="response")
+
+obs_pred <- bind_cols(pp_mod_data, data.frame(predicted)) %>%
+  mutate(observed = Weight_dv)
+```
+
+```{r, fig.width=6.5, fig}
+# 3-line plot of the per-protocol model
+obs_pred %>%
+  mutate(group = ifelse(slope1 == 1, "Con", ifelse(slope2 == 1, "Int_PW", "Int_nPW")))%>%
+  select(Arb_PersonId, N_months_post_id, observed, predicted, Intervention, group) %>%
+  group_by(group, Intervention, N_months_post_id) %>%
+  summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
+  pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
+  # filter(N_months_post_id < 5, Intervention == "Control") %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type, )) +
+  # geom_point() +
+  geom_line() +
+  facet_wrap(~group) +
+  theme_minimal()
+```
+
+
+
+```{r}
+model_output <- broom.mixed::tidy(lmer_mod_bin)
+
+# write_csv(x = model_output, here("lmer_model_output.csv"))
+```
+
+```{r}
+# Set a vector for term labels of the binary variables that were not included in 
+# the model because its not necessary to include sex_f and sex_m in the formula.
+# These terms are added for completeness when building the final output table
+# and are used to create an ordered vector of terms for displaying the table.
+term <- c("age_lt_45",
+  "sex_f",
+  "reth_nhw",
+  "year_at_ind0")
+
+model_terms <- model_output %>% pull(term)
+
+# Set the order of the terms to organize them in a subsequent table
+ordered_terms <- c(
+  model_terms[1],
+  term[1],
+  model_terms[2:3],
+  term[2],
+  model_terms[4],
+  term[3],
+  model_terms[5:9],
+  term[4],
+  model_terms[10:20]
+)
+
+# Create the main table
+# stack the vector terms with model_output
+tab <- bind_rows(model_output, 
+          (data.frame(term) %>% 
+             mutate(effect = "fixed"))) %>% 
+  
+  # Arrange the terms in the previous step to the pre-specified orer
+  arrange((factor(term, levels = ordered_terms))) %>% 
+  
+  # remove columns that are not needed for display
+  select(-effect, -group, -statistic, -df) %>% 
+  
+  # remove rows that are not needed for display
+  filter(!term %in% c("sd__(Intercept)", "sd__Observation")) %>%
+  
+  # convert the estimate for N_days_* to N_months_*
+  mutate(estimate = ifelse(grepl("N_days_post", term), estimate * 30, estimate)) %>%
+  mutate(std.error = ifelse(grepl("N_days_post", term), std.error * 30, std.error)) %>%
+  
+  # round values
+  mutate(across(estimate:p.value, ~round(., 3))) %>%
+
+  # convert term N_days_* to N_months_* and slope* to human readable
+  mutate(term = str_replace(term, "N_days_post_id", "N_months_post_id"),
+         term = str_replace(term, "N_days_post_180", "N_months_post_180"),
+         term = str_replace(term, "slope1", "Control"),
+         term = str_replace(term, "slope2", "Int_PW"),
+         term = str_replace(term, "slope3", "Int_No_PW")) %>% 
+  
+  # relabel all of the values in the "term" column
+  mutate(term = case_when(
+    term == "age_lt_45" ~ "<45",
+    term == "age_45_to_60" ~ "[45, 60)",
+    term == "age_gt_60" ~ ">60",
+    term == "sex_f" ~ "Female",
+    term == "sex_m" ~ "Male",
+    term == "reth_nhw" ~ "NonHispanicWhite",
+    term == "reth_his" ~ "Hispanic",
+    term == "reth_blk" ~ "Black",
+    term == "reth_asn" ~ "Asian",
+    term == "reth_oth" ~ "Other",
+    term == "reth_ukn" ~ "Unknown",
+    term == "year_at_ind0" ~ "0",
+    term == "year_at_ind1" ~ "1",
+    term == "year_at_ind2" ~ "2",
+    term == "year_at_ind3" ~ "3",
+    term == "Weight_bl" ~ "Weight_bl (kg)",
+    term == "Intr" ~ "Intervention",
+    .default = term))
+```
+
+
+```{r}
+# Add grouping rows for the following terms
+tab %>%
+  mutate(across(estimate:std.error, ~ as.character(.))) %>%
+  mutate(across(p.value, ~sprintf("%.3f", .))) %>% # Converting to character, but preserve the trailing zeros
+  gt::gt(rowname_col = "term") %>%
+  gt::rows_add(
+    term = "Age",
+    estimate = "",
+    std.error = "",
+    p.value = "    ",
+    .after = "(Intercept)"
+  ) %>%
+  gt::rows_add(
+    term = "Gender",
+    estimate = "",
+    std.error = "",
+    p.value = "",
+    .before = "Female") %>%
+  gt::rows_add(
+    term = "Race/Ethnicity",
+    estimate = "",
+    std.error = "",
+    p.value = "",
+    .after = "Male") %>%
+  gt::rows_add(
+    term = "Year at Index",
+    estimate = "",
+    std.error = "",
+    p.value = "",
+    .before = "0") %>%
+  gt::tab_header(
+    title = "Per-protocol model w 3 slopes",
+    # subtitle = "subtitle place holder"
+  )
+```
+
+```{r, echo = FALSE, eval = FALSE}
+# Plot observed weights only
+pp_mod_data %>%
+  select(Phase, N_months_post_id, Weight_dv) %>%
+  group_by(Phase, N_months_post_id) %>%
+  summarise(across(Weight_dv, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
+  mutate(Phase = ifelse(Phase == 0, "Control", "Intervention")) %>%
+  ggplot(., aes(x = N_months_post_id, y = Weight_dv, color = Phase)) +
+  geom_line() +
+  facet_wrap(~Phase) +
+  theme_minimal()
+```
+
+```{r, fig.width=6.5, eval=FALSE, echo = FALSE}
+# 4 line plot of PW and nPW in intervention and control groups
+
+obs_pred %>%
+  mutate(pw = ifelse(Arb_PersonId %in% pw_ids, "PW", "nPW"))%>%
+  select(Arb_PersonId, N_months_post_id, observed, predicted, Intervention, pw) %>%
+  group_by(pw, Intervention, N_months_post_id) %>%
+  summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
+  pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
+  # filter(N_months_post_id < 5, Intervention == "Control") %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = pw, )) +
+  # geom_point() +
+  geom_line(aes(linetype = Type)) +
+  facet_wrap(~Intervention) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  labs(color = "", linetype = "")
+```

@@ -1,0 +1,72 @@
+---
+format: docx
+params:
+  delivery: "20240326"
+  
+execute: 
+  echo: false
+---
+
+```{r}
+pacman::p_load(here,         # For managing directory paths
+               magrittr,     # For the assignment pipe operator %<>%
+               tidyverse,    # For data manipulation tools
+               gtsummary,
+               install = FALSE)    
+```
+
+```{r}
+clinic_engagement <- read_csv("S:/FM/PATHWEIGH/Quantitative/Projects/working_files/clinic_engagement.csv", col_types = cols())
+```
+
+
+```{r}
+# Set the project root to be used as an input to the load() function
+proj_root <- "S:/FM/PATHWEIGH/Quantitative/Projects/"
+
+# Set the data delivery date to the appropriate data set
+delivery <- params$delivery
+
+# Load visits post id -----------------------------------------------------------
+load(str_c(proj_root, "dataset_", delivery, "/data/processed_visits_post_id_", delivery, ".Rdata"))
+```
+
+```{r}
+# Trying a purrr map function to make two tables then merge
+    c("Control", "Intervention") %>%
+      purrr::map(
+        ~visits_post_id %>%
+          filter(IndexVisit == 1,
+                 Intervention.factor == .x) %>%
+          mutate(across(PHQ2:GAD7, ~ as.numeric(.))) %>%
+          mutate(Insurance = factor(Insurance, levels = c("Commercial", "Medicare", "Medicaid", "Self-Pay", "Unknown"))) %>%
+          mutate(Race_Ethnicity = factor(Race_Ethnicity, levels = c("Non-Hispanic White", "Hispanic or Latino", "Black or African American", "Asian", "Other", "Unknown"))) %>%
+          mutate(Race_Ethnicity = fct_na_value_to_level(Race_Ethnicity, level = "Unknown"),
+                 EOSS = fct_na_value_to_level(factor(EOSS), level = "Unknown")) %>%
+          mutate(Intervention.factor = factor(Intervention.factor, levels = c("Control", "Intervention"))) %>%
+          select(Age, Sex, Race_Ethnicity, Insurance, BMI,
+                 Systolic_blood_pressure, Diastolic_blood_pressure, 
+                 A1C:TSH, -`Cystatin C`, EOSS,
+                 PHQ2, PHQ9, GAD7, Smoking_Status) %>%
+          tbl_summary(
+            missing = "no",
+            type = list(c(PHQ2, PHQ9, GAD7) ~ 'continuous'),
+            statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+            label = list(Race_Ethnicity ~ "Race/Ethnicity",
+                         BMI ~ "BMI (kg/m^2)",
+                         Systolic_blood_pressure ~ "Systolic BP (mmHg)",
+                         Diastolic_blood_pressure ~ "Diastolic BP (mmHg)",
+                         Smoking_Status ~ "Smoking Status"),
+            digits = list(all_categorical() ~ c(0,1),
+                          all_continuous() ~ c(1,1))
+          ) %>%
+          add_n(., 
+                statistic = "{N_miss} ({p_miss}%)",
+                col_label = "**N Missing**") %>%
+          # show_header_names()
+          modify_table_body(~.x %>% dplyr::relocate(n, .after = stat_0))
+      ) %>%
+      tbl_merge(., tab_spanner = c("**Control**", "**Intervention**")) %>%
+      modify_caption("**Health metrics of eligible and enrolled patients at index visits**")
+```
+
