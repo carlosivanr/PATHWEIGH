@@ -41,15 +41,13 @@
 
 # Capture comorbidities function -----------------------------------------------
 capture_comorbidities <- function(temp, times, years){
-  # Set the options for furrr()
-  # cores determines the number of cores to use, labs are numerical labels to 
   # assign to a subset of the data. 891289600 bytes is equal to 850MB in binary.
   # global max size needs to be increased as data sets increases.
   # cores <- (future::availableCores() - 1) # !!! causes multisession failure
   # cores <- 6 # !!! 8 cores or more causes multisession failure
   # labels <- seq_along(1:cores)
-  # # options(future.rng.onMisuse = "ignore",
-  # #         future.globals.maxSize= 891289600) # !!! options causes multisession failure
+  # options(future.rng.onMisuse = "ignore",
+  #         future.globals.maxSize= 891289600) # !!! options causes multisession failure
   # options(future.rng.onMisuse = "ignore",
   #         future.globals.maxSize= 445644800) # 524288000 (500 MB)
   # 

@@ -1,9 +1,8 @@
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # Authors:
 # Carlos Rodriguez
 # Krithika Suresh
 # Emileigh Willems
-
 
 # Description: _________________________________________________________________
 # This script is part 2 in the PATHWEIGH EMR data pipeline. It is used
@@ -78,22 +77,10 @@
 # Year 2 March 17, 2022 - March 16, 2023, Group 2 crosses over to intervention
 # Year 3 March 17, 2022 - March 16, 2024, Group 3 crosses over to intervention
 
-
-
 # Built with R 4.2.2
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+################################################################################
 
-# Load Packages ----------------------------------------------------------------
-# pacman::p_load(here,         # For managing directory paths
-#                magrittr,     # For the assignment pipe operator %<>%
-#                tidyverse,    # For data manipulation tools
-#                furrr,        # For parallel processing
-#                data.table,   # For reading .csv files
-#                openxlsx,     # For reading .xlsx files
-#                tictoc,       # For timing and benchmarking functions
-#                gtsummary,    # For tables
-#                install = FALSE)
-
+# %% Load Packages -------------------------------------------------------------
 library(tidyverse, quietly = TRUE, warn.conflicts = FALSE)
 library(magrittr, include.only = "%<>%")
 library(here)
@@ -108,30 +95,23 @@ cores <- 1 # !!! 8 cores or more causes multisession failure
 labels <- seq_along(1:cores) # used for split_by group in nested functions
 plan(sequential, workers = cores)
 
-# # Set plan()
-# # Algorithms in proc_ee_ene() utilize future_map_dfr() for parallel processing,
-# # but it has been unreliable after implementing renv() for package management
-# # into the R project. If multisession results in an error, set to sequential for
+# Set plan()
+# Algorithms in proc_ee_ene() utilize future_map_dfr() for parallel processing,
+# but it has been unreliable after implementing renv() for package management
+# into the R project. If multisession results in an error, set to sequential for
 # processing in serial without having to modify the underlying code.
 # if (grepl("Error", result[1])) {
-#   plan(sequential) # If plan multisession for parallel fails, set to serial
+#   plan(sequential) # If multisession fails, set to serial
 # }
 
 # Specify parameters -----------------------------------------------------------
-RData <- "20240326.RData"
+RData <- "20240326.RData" # Used as an out to write files
 
 # For the proc_ene script
 date_min <- as.Date("2020-03-17")
 date_max <- as.Date(lubridate::ymd(substr(RData, 1, 8)))
 
-# print.text <- FALSE
-# save_data_sets <- TRUE
-
-
-# Load Rimage data -------------------------------------------------------------
-# Load .Rdata to preserve any formatting from compass delivery import
-# load(here("data", RData))
-
+save_data_sets <- TRUE
 
 # Source sub-scripts -----------------------------------------------------------
 # Loads all subscript functions into the workspace
@@ -227,11 +207,9 @@ if (visits %>%
       reframe(across(starts_with("WPV_"), is.na)) %>%
       reframe(across(starts_with("WPV_"), sum)) %>%
       rowSums() == 0) {
-
       # Apply rowSums over columns where names start with WPV_
       visits %<>%
-        mutate(WPV = rowSums(select(., starts_with("WPV_"))))
-
+      mutate(WPV = rowSums(select(., starts_with("WPV_"))))
 } else {
   stop("NAs detected in WPV_ columns. Review creation of WPV variables.")
 }
@@ -249,7 +227,6 @@ toc()
 beepr::beep(sound = 2)
 invisible(gc())
 
-
 # Last visit in control phase --------------------------------------------------
 # Set the last visit in control's weight, from the first visit in the
 # intervention if and only if the first intervention has a weight, otherwise
@@ -266,8 +243,10 @@ invisible(gc())
 # Create the eligible and enrolled ---------------------------------------------
 # For enrolled individuals (EE), filter only the visits after the index date
 ee <- visits %>%
-  filter(Enrolled == 1,
-         EncounterDate >= IndexDate)
+  filter(
+    Enrolled == 1,
+    EncounterDate >= IndexDate
+  )
 
 ee_ids <- ee$Arb_PersonId
 
@@ -275,10 +254,12 @@ ee_ids <- ee$Arb_PersonId
 # Select the non-eligible and non-enrolled visits excluding patients that are
 # in the ee subset
 ene <- visits %>%
-  filter(Eligible == 1,
-         Enrolled == 0,
-         !Arb_PersonId %in% ee_ids,
-         EncounterDate >= IndexDate)
+  filter(
+    Eligible == 1,
+    Enrolled == 0,
+    !Arb_PersonId %in% ee_ids,
+    EncounterDate >= IndexDate
+  )
 
 # Process EE and ENE for labs and comorbidities --------------------------------
 # Process the ee and ene data for labs, procedures, referrals, EOSS, and
@@ -294,7 +275,6 @@ invisible(gc())
 # project requirement changes to include meds, labs, procedures, etc. in the
 # modeling data rendered this feature obsolete.
 tic()
-# ee_ene <- proc_ee_ene(ee_ene, proc_labs = TRUE, proc_dx = TRUE)
 source(str_c(emr_dir, "subscripts/proc_ee_ene.R"))
 rm(ind_con, ind_int, lv_con, lv_int, dx_sub, dx_sub_coi_count)
 toc()
@@ -324,13 +304,11 @@ invisible(gc())
 # remedies the error. Error is in the output of the enrollment table.
 create_enrollment_table(visits_post_id)
 
-
 # Make mod_data ----------------------------------------------------------------
 # Create a data frame for the primary aim statistical models. Automatically
 # outputs mod_data_full which consists of ee and ene data and mod_data_ee, the
 # subset of ee patients only to ./data of the current project directory.
 mod_data <- ee_ene %>% make_mod_data(., data_delivery_date)
-
 
 # Make pp_data -----------------------------------------------------------------
 # Create a data frame for the per_protocol analysis
@@ -340,17 +318,37 @@ mod_data <- ee_ene %>% make_mod_data(., data_delivery_date)
 source(str_c(emr_dir, "subscripts/make_pp_data.R"))
 invisible(gc())
 
-
 # Save datasets ----------------------------------------------------------------
 # can also use a substring on RData to just get the date.
-save(visits, file = here(proj_root_dir, "data", paste0("processed_all_visits_", RData)))
-save(visits_post_id, file = here(proj_root_dir, "data", paste0("processed_visits_post_id_", RData)))
-save(ee_ene, file = here(proj_root_dir, "data", paste0("ee_ene_", RData)))
-save(pp_data, file = here(proj_root_dir, "data", paste0("pp_data_", RData)))
-saveRDS(comorbidity_names, file = here(proj_root_dir, "data", str_c("comorbidity_names_", data_delivery_date,".RDS")))
+save(visits,
+  file = here(proj_root_dir, "data", paste0("processed_all_visits_", RData))
+)
+
+save(
+  visits_post_id,
+  file = here(proj_root_dir, "data", paste0("processed_visits_post_id_", RData))
+)
+
+save(
+  ee_ene,
+  file = here(proj_root_dir, "data", paste0("ee_ene_", RData))
+)
+
+save(
+  pp_data,
+  file = here(proj_root_dir, "data", paste0("pp_data_", RData))
+)
+
+saveRDS(
+  comorbidity_names,
+  file = here(
+    proj_root_dir, "data",
+    str_c("comorbidity_names_", data_delivery_date, ".RDS")
+  )
+)
 
 
-# LEFT OFF HERE 
+# LEFT OFF HERE
 # WORKING ON GETTING TABLES
 
 
@@ -404,7 +402,7 @@ if (data.frame(grep("O2CPAPBIPAP", (names(visits_post_id)))) %>% nrow() > 0) {
 }
 
 
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+#
 # Check visits vs visits_post_id -----------------------------------------------
 # Includes all visits for EE patients after the index visit, regardless of
 # whether or not those visits were WPV or if they have a recorded weight.
@@ -468,7 +466,7 @@ mod_data[["ee"]] %>%
   group_by(Phase) %>%
   count()
 
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 # Count lines of uncommented code
 # Declare line counting function -----------------------------------------------
 foo <- function(path) {
