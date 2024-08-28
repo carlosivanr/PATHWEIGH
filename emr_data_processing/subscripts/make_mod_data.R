@@ -107,7 +107,7 @@ make_mod_data <- function(data, delivery){
       # Year_at_ind, if it's not the index visit, the value will be set to NA 
       # for the same reason. Weight_dv is copied from Weight_kgs from 
       mutate(Weight_bl = ifelse(IndexVisit == 1, Weight_kgs, NA),
-             Weight_dv = ifelse(IndexVisit != 1, Weight_kgs, NA),
+             Weight_dv = Weight_kgs,
              Year_at_ind = ifelse(IndexVisit == 1, Year, NA)) %>%
       
       # Convert Weight_bl and Year_at_ind to time invariant variables
@@ -116,9 +116,11 @@ make_mod_data <- function(data, delivery){
       fill(Year_at_ind, .direction = "updown") %>%
       ungroup() %>%
       
-      # Remove the index visits from the data set and any rows for which weight
-      # data were not collected
-      filter(IndexVisit == 0) %>%
+      # Remove the index visits from the data set 
+      # modified 08/28/2024 to include the index visits
+      # filter(IndexVisit == 0) %>%
+      
+      # Remove any rows for which weight data were not collected
       drop_na(Weight_dv) %>%
     
       # Factor Arb Person Id (for repeated measures)
@@ -192,7 +194,7 @@ make_mod_data <- function(data, delivery){
   time_invariant_vars <- 
     data %>%
     filter(Censored == 0,
-           IndexVisit ==1,
+           IndexVisit == 1,
            Arb_PersonId %in% mod_data$Arb_PersonId) %>%
     select(Arb_PersonId, Age, BMI, Intervention.factor, Cohort) %>% 
     mutate(Age_cat = ifelse(Age <= 45, "<=45", NA),
@@ -219,17 +221,17 @@ make_mod_data <- function(data, delivery){
            Race_Ethnicity = factor(Race_Ethnicity, levels = c("Non-Hispanic White", "Hispanic or Latino", "Black or African American", "Asian", "Other", "Unknown")))
   
   
-  # Load the engagement .csv file
-  engagement <- read_csv(
-    str_c(proj_parent_dir, "/working_files/", "clinic_engagement.csv"),
-    col_types = cols()
-    )
-
-  # filter data
-  # join with mod data by dept epic Id
-  mod_data <- left_join(mod_data, 
-                        (engagement %>% select(DepartmentEpicId, Engagement)), 
-                        by = "DepartmentEpicId")
+  # # Load the engagement .csv file
+  # engagement <- read_csv(
+  #   str_c(proj_parent_dir, "/working_files/", "clinic_engagement.csv"),
+  #   col_types = cols()
+  #   )
+  # 
+  # # filter data
+  # # join with mod data by dept epic Id
+  # mod_data <- left_join(mod_data, 
+  #                       (engagement %>% select(DepartmentEpicId, Engagement)), 
+  #                       by = "DepartmentEpicId")
            
   # Make modifications to the names and values of the phase variables so that
   # the output of the lm() summary is not so cumbersome to read
@@ -290,6 +292,10 @@ make_mod_data <- function(data, delivery){
                 Intervention.factor == "Intervention") %>%
          select(all_of(names_to_select)))) %>%
     mutate(Arb_PersonId = factor(Arb_PersonId))
+  
+  mod_data_w_ind <- mod_data
+  mod_data <- mod_data %>% filter(IndexVisit == 0)
+  ee <- ee %>% filter(IndexVisit == 0)
 
   # Write out the data set -----------------------------------------------------
   # Save mod_data to the data directory on the network drive
@@ -297,9 +303,13 @@ make_mod_data <- function(data, delivery){
   
   save(ee, file = here("delivery_20240326", "data", str_c("mod_data_ee_", delivery, ".RData")))
   
-  mod_data <- list(mod_data, ee)
+  save(mod_data_w_ind, file = here("delivery_20240326", "data", str_c("mod_data_w_ind", delivery, ".RData")))
+  
+  mod_data <- list(mod_data, 
+                   ee, 
+                   mod_data_w_ind)
 
-  names(mod_data) <- c("mod_data", "ee")
+  names(mod_data) <- c("mod_data", "ee", "mod_data_w_ind")
   
   return(mod_data)
   

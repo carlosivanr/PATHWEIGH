@@ -126,7 +126,7 @@ data %>%
 
 
 # Load the order file ----------------------------------------------------------;
-clinic_index <- read_csv("S:/FM/PATHWEIGH/Quantitative/Projects/working_files/supp2_clinic_order.csv")
+clinic_index <- read_csv("D:/PATHWEIGH//working_files/supp2_clinic_order.csv")
 
 
 # Clean and prep the data file--------------------------------------------------;
@@ -143,7 +143,7 @@ clinic_index %>%
 left_join(output, clinic_index, by = "DepartmentEpicId") %>%
   arrange(ind) %>%
   select(-ind) %>%
-  writexl::write_xlsx(., path = str_c("S:/FM/PATHWEIGH/Quantitative/Projects/working_files/supp2_wpv_", data_delivery_date ,"_.xlsx"))
+  writexl::write_xlsx(., path = str_c("D:/PATHWEIGH//working_files/supp2_wpv_", data_delivery_date ,"_.xlsx"))
 
 
 # Verify data for Depot Hill (spot check)

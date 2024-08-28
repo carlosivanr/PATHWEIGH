@@ -39,13 +39,13 @@ pacman::p_load(here,         # For managing directory paths
 #| echo: false
 
 # Set the project root
-proj_root <- "S:/FM/PATHWEIGH/Quantitative/Projects/"
+proj_root <- "D:/PATHWEIGH//"
 
 # Set the data delivery date to the appropriate data set
 delivery <- params$delivery
 
 # Load ee model data -----------------------------------------------------------
-load(str_c(proj_root, "dataset_", delivery, "/data/mod_data_ee_", delivery, ".Rdata"))
+load(str_c(proj_root, "delivery_", delivery, "/data/mod_data_ee_", delivery, ".Rdata"))
 
 # Filter ee data to 18 months
 ee %<>%

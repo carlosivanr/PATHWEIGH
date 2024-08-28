@@ -31,13 +31,13 @@ pacman::p_load(here,         # For managing directory paths
 
 ```{r}
 # Set the project root
-proj_root <- "S:/FM/PATHWEIGH/Quantitative/Projects/"
+proj_root <- "D:/PATHWEIGH//"
 
 # Set the data delivery date to the appropriate data set
 delivery <- params$delivery
 
 # Load pp_mod_data
-load(str_c(proj_root, "dataset_", delivery, "/data/pp_mod_data_", delivery, ".Rdata"))
+load(str_c(proj_root, "delivery_", delivery, "/data/pp_mod_data_", delivery, ".Rdata"))
 ```
 
 ```{r}
@@ -292,6 +292,12 @@ pp_mod_data %>%
 
 ```{r, fig.width=6.5, eval=FALSE, echo = FALSE}
 # 4 line plot of PW and nPW in intervention and control groups
+pw_ids <- 
+  pp_data %>%
+  mutate(PW_Visit = if_else(WPV_WMQ == 1 | WPV_PW_flow ==1 | WPV_IP == 1 | WPV_TH == 1 | WPV_smart == 1, 1, 0)) %>%
+  filter(PW_Visit == 1) %>%
+  distinct(Arb_PersonId) %>%
+  pull(Arb_PersonId)
 
 obs_pred %>%
   mutate(pw = ifelse(Arb_PersonId %in% pw_ids, "PW", "nPW"))%>%

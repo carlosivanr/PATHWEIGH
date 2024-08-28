@@ -112,6 +112,8 @@ comorbidity_names <- names(
     select(Dyslipidemia:`Binge eating`)
   )
 
+
+
 # Create an index of the order of comorbidity column names arranged by the 
 # sum of the column's values. This index is used to order the columns by 
 # frequency for displaying in a table
@@ -122,7 +124,8 @@ index <-
   order(decreasing = TRUE)
 
 # Reorder comorbidity names
-comorbidity_names <- comorbidity_names[index]
+comorbidity_names <<- comorbidity_names[index]
+
 
 # Rearrange the columns so that the cormorbidities are ordered from most 
 # frequently observed comorbidities that are observed at least 2x within the 2

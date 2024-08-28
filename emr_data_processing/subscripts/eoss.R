@@ -22,8 +22,6 @@
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 eoss <- function(temp){
-  # tic()
-  
   # Set the number of days prior to and after the index/reference visit
   # n.b. days after reference will be negative when subtracting reference
   # from OrderedDate
@@ -40,15 +38,6 @@ eoss <- function(temp){
   
   # Save the number of rows of temp to ensure merges are conducted correctly
   n_obs_start <- dim(temp)[1]
-  
-  # Pare down the data frame for development purposes
-  # *** Probably not needed if the meds and dxs cant be 
-  # The labs could be used though
-  # temp %<>%
-  #   select(Arb_PersonId, 
-  #          Intervention,
-  #          Systolic_blood_pressure, Diastolic_blood_pressure,
-  #          O2CPAPBIPAP:Ref_WellnessClinic)
   
   # Create distinct_pts_x_ind ----
   # distinct_pts_x_ind borrowed from labs & procedures script. Originally 
@@ -82,69 +71,6 @@ eoss <- function(temp){
   # data sets, unless those tables get updated as well.
   # Originally, Gestational Diabetes not found, had to revise & resubmit PR & 
   # Definitions, O24 instead of Q24. Then prediabetes was added.
-  
-  # Set delivery to the location/date in the PATHWEIGH_DATA_SECURE folder
-  # to load updated tables for 20230322 only
-  if (data_delivery_date == "20230322"){
-    # Set delivery directory the updated comorbidity delivery
-    delivery <- "20230809_DXandDXComo"
-  
-    # Specify file patterns to search for in the delivery directory
-    patterns <- c("Table6_DX", "Table7_DXComo")
-    
-    # Create a vector of paths to the specified data delivery directory that match
-    # the table vector for importing .csv files
-    files <- dir(here("../../../PATHWEIGH_DATA_SECURE/", delivery), 
-                 pattern = paste(patterns, collapse = "|"))
-    
-    # Parse the files paths to get the corresponding names to assign to the tables
-    # once imported 
-    df_names <- tolower(
-      sub(".*_", "", 
-          substring(substring(files, 1, nchar(files)-13), 7)
-      )
-    )
-    
-    # Modify the names to reflect what will be required for subsequent data
-    # processing steps
-    for (i in 1:length(df_names)){
-      if (grepl("referral", df_names[i])){
-        df_names[i] <- "referrals"
-      } else if (grepl("samrtdata", df_names[i])){
-        df_names[i] <- "smart"
-      } else if (grepl("dxcomo", df_names[i])){
-        df_names[i] <- "dxco"
-      } else if (grepl("lab", df_names[i])){
-        df_names[i] <- "labs"
-      } else if (grepl("flowsheet", df_names[i])){
-        df_names[i] <- "flowsheets"
-      } else if (grepl("med", df_names[i])){
-        df_names[i] <- "meds"
-      }
-    }
-    
-    # Set the file paths for importing COMPASS Tables
-    file_paths <- str_c(here("../../../PATHWEIGH_DATA_SECURE", delivery, files))
-    
-    # Import COMPASS Tables in parallel --------------------------------------------
-    # Set furrr options
-    #plan(multisession, workers = availableCores()) # plan/future/furrr broken
-    #plan(sequential)
-    
-    tables <- file_paths %>% 
-      future_map(~ fread(., 
-                         header = TRUE, 
-                         integer64 = "numeric", 
-                         na.strings = c("", "NA")))
-    
-    # Set the names of the tables
-    tables <- setNames(tables, df_names)
-    
-    # Place all compass table data frames into the global environment
-    invisible(list2env(tables, envir = .GlobalEnv))
-    
-    #rm(tables)
-  }    
 
   # Dyslipidemia - picks up nothing, but is listed in the comorbidities_of_interest.
   # NAFLD - use  "Fatty (Change of) liver, not elsewhere classified", but is listed in the comorbidities_of_interest.
@@ -230,29 +156,7 @@ eoss <- function(temp){
     filter(grepl(str_c(stage_3_terms, collapse = "|"), ignore.case = TRUE, DiagnosisDescription)) %>%
     pull(Arb_PersonId)
   
-  # Check for terms
-  # dx_sub %>%
-  #   filter(grepl("oma", 
-  #                ignore.case = TRUE, 
-  #                DiagnosisDescription)) %>%
-  #   pull(DiagnosisDescription) %>%
-  #   table(.) %>%
-  #   names(.)
   
-  # Create a table to display the diagnoses
-  # *** Will this table be reproduced many times? Will it vary by intervention?
-  # If so, then modify the output filename to include a suffix
-  # Alternatively, save the data, combine, and then create a table
-  # dx_sub %>%
-  #   select(DiagnosisDescription) %>%
-  #   tbl_summary(sort = everything() ~ "frequency") %>%
-  #   modify_caption("**Available EOSS search terms for patients of interest**") %>%
-  #   as_gt() %>%
-  #   gt::gtsave(
-  #     filename = here("tables", 
-  #                     str_c("eoss_diagnoses_", 
-  #                           date_max, "_", 
-  #                           Sys.Date(), ".pdf")))
   
   # Medications ----------------------------------------------------------------
   beta_blockers <- c("propranolol", "metoprolol")
@@ -401,71 +305,4 @@ eoss <- function(temp){
   return(temp)
 }
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-
-# %%%%%%%%%%%%%% VESTIGIAL CODE TO REVIEW THE DX_SUB TABLE DATA %%%%%%%%%%%%%%%%
-# Check the dx_sub table -----------------------------------------------------
-# Searches over 4 million records
-# "cancer" not found in the raw data
-# dx_sub %>%
-# filter(grepl("cerebral infarction", 
-#              ignore.case = TRUE, 
-#              DiagnosisDescription)) %>%
-# select(DiagnosisDescription) %>%
-# tbl_summary()
-# 
-# 
-# dx_sub %>%
-#   filter(grepl("I25", 
-#                ignore.case = TRUE, 
-#                DiagnosisCode)) %>%
-#   select(DiagnosisCode) %>%
-#   tbl_summary()
-# 
-# dx_sub %>%
-#   filter(grepl("atheroscler", 
-#                ignore.case = TRUE, 
-#                DiagnosisDescription)) %>%
-#   select(DiagnosisCode) %>%
-#   tbl_summary()
-# 
-# dx_sub %>%
-#   filter(grepl("K76", 
-#                ignore.case = TRUE, 
-#                DiagnosisCode)) %>%
-#   select(DiagnosisDescription) %>%
-#   tbl_summary()
-#
-# check_dx %>%
-#   select(DiagnosisDescription) %>%
-#   tbl_summary()
-# 
-# # Check ICD-10 Codes ----
-# # Checking for O24 in ICD-10 Codes comes up with nothing
-# dx %>% 
-#   filter(grepl("O24", ignore.case = TRUE, DiagnosisCode)) %>%
-#   select(DiagnosisCode) %>%
-#   tbl_summary()
-# 
-# # Create a table of all available ICD-10 Codes in the dx table
-# # When searching all ICD-10 codes, none start with "O", Other maternal 
-# # disorders predominantly related to pregnancy ICD-10-CM Code range O20-O29
-# dx %>%
-#   select(DiagnosisCode) %>%
-#   tbl_summary()
-# 
-# # Checking the dxco table does not result in any "O" icd_10 codes either,
-# # suggesting that it may have not been picked up in the data. dxco searches
-# # almost 20 million records
-# dxco %>%
-#   select(DiagnosisCode) %>%
-#   tbl_summary()
-# 
-# # Check codes
-# dxco %>%
-#   filter(grepl("E78",
-#                ignore.case = TRUE,
-#                DiagnosisCode)) %>%
-#   select(DiagnosisDescription) %>%
-#   tbl_summary()
 

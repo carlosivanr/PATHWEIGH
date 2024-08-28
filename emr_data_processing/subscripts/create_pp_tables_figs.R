@@ -13,17 +13,17 @@ make_pp_tables <- function(data){
   # # TEMPORARY CHUNK TO MAKE TABLES FROM A PREVIOUSLY GENERATED PIPELINE OUTPUT
   #
   # # Set the project root
-  # proj_root <- "S:/FM/PATHWEIGH/Quantitative/Projects/"
+  # proj_root <- "D:/PATHWEIGH//"
   # 
   # # Set the data delivery date to the appropriate data set
   # delivery <- 20240326
   # 
   # # Load pp_mod_data
-  # load(str_c(proj_root, "dataset_", delivery, "/data/pp_data_", delivery, ".Rdata"))
+  # load(str_c(proj_root, "delivery_", delivery, "/data/pp_data_", delivery, ".Rdata"))
   # data <- pp_data
   # 
   # # Load visits_post_id
-  # load(str_c(proj_root, "dataset_", delivery, "/data/processed_visits_post_id_", delivery, ".Rdata"))
+  # load(str_c(proj_root, "delivery_", delivery, "/data/processed_visits_post_id_", delivery, ".Rdata"))
 
   # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   
@@ -368,7 +368,7 @@ make_pp_tables <- function(data){
   # # scores
   # 
   # # The .qmd document is located in
-  # # "S:/FM/PATHWEIGH/Quantitative/Projects/emr_data_processing/report_layouts/
+  # # "D:/PATHWEIGH//emr_data_processing/report_layouts/
   # 
   # # The .qmd document is clinic_engagement.qmd
   # 
@@ -404,7 +404,7 @@ make_pp_tables <- function(data){
   # 
   # # Figure: LMER observed & predicted values -----------------------------------
   # The .qmd document is located in
-  # "S:/FM/PATHWEIGH/Quantitative/Projects/emr_data_processing/report_layouts/
+  # "D:/PATHWEIGH//emr_data_processing/report_layouts/
   
   # The .qmd document is lmer_model_output_and_figure.qmd
   

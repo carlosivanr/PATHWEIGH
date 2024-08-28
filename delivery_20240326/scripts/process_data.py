@@ -224,7 +224,8 @@ visits = visits.with_columns(
     )
 
 # Create Age
-# First create a pandas data frame, compute age at the time of encounter in year
+# First create a pandas data frame to compute age at the time of encounter in year
+# because figuring out how to implement in Polars was taking too long
 age_enc_pd = visits.select(["Arb_EncounterId", "EncounterDate", "BirthDate"]).to_pandas()
 
 # Calculate age at the time of encounter
@@ -284,14 +285,14 @@ visits = visits.with_columns(
     )
 
 
-# %% WPV ICD
-# load dx dataframe
+# %% WPV ICD ---
 tab_path = data_path + "/C2976_Table6_DX_" + delivery + ".csv"
 
  # read the patient table
 dx = pl.read_csv(tab_path, null_values = ["*Unspecified", "-999", "*Restricted", "", "X"])
 
-# Create a list of E66 Codes as a series
+# Create a list of E66 Codes as a series in pandas
+# using pandas was more elegant and succinct than polars
 e_suffix = pd.Series(["01", "09", "1", "2", "3", "8", "9"])
 e66_codes = pd.Series(["E66."]*e_suffix.size).str.cat(e_suffix)
 
@@ -312,7 +313,7 @@ wpv_icd_ids = (dx
 )
 
 # Create a data frame to merge in the binary values
-wpv_icd_ids = icd_ids.with_columns(
+wpv_icd_ids = wpv_icd_ids.with_columns(
     WPV_ICD = 1
 )
 
@@ -328,8 +329,92 @@ visits = visits.with_columns(
 
 # %%
 # WPV Flowsheets
-# WPV DX
-# WPV Visit Type
+# Flowsheets represent identifiers to either entire questionnaires or individual questions from questionnaires
+# WPV identified from the questions in the PW WMQ as pw_flow or the OBHPI. WPVs also identified by the
+# entire WMQ questionnaire as PW WMQ. The general approach is filter the flowsheets table to identify
+# encounters that match one of the FlowSheetEpicIds or TemplateEpicIds, pull the EncounterIds, and set 
+# aside. Then in visits df, set each WPV column if the EncounterId is in its respective list of encounters
+# pulled from the flowsheets table.
+
+# Set the path to the patient table
+tab_path = data_path + "/C2976_Table8_Flowsheet_" + delivery + ".csv"
+
+ # read the patient table
+flowsheets = pl.read_csv(tab_path, null_values = ["*Unspecified", "-999", "*Restricted", "", "X"])
+
+# Load the csv file with the flowsheet ids
+flowsheet_ids = pl.read_csv("D:/PATHWEIGH/working_files/FlowsheetIDs_Obesity_Brief_HPI_PW.csv")
+
+# Prep the flowhsheet_ids dataframe
+# Define WPV_WMQ WPV_OBHPI WPV_PW_flow
+# Get the flowsheet ids associated with PW flow
+pw_flow_ids = pl.Series(
+    flowsheet_ids
+    .filter(pl.col("PATHWEIGH") == "X")
+    .select("Flowsheet_RowID")
+    ).to_list()
+
+# Get the encounter ids in the flowsheets table that satisfy the pw_flow_ids
+pw_flow_encs = pl.Series(
+    flowsheets
+    .filter(
+    pl.col("FlowsheetRowEpicId")
+    .is_in(pw_flow_ids)
+    ).select("Arb_EncounterId")
+    ).to_list()
+
+
+# If the Encounter id is in the list, set to 1 otherwise 0
+vists = visits.with_columns(
+    pl.when(pl.col("Arb_EncounterId").is_in(pw_flow_encs))
+    .then(pl.lit(1))
+    .otherwise(0)
+    .alias("WPV_PW_flow")
+)
+
+wmq_encs = pl.Series(
+flowsheets.filter(
+    pl.col("FlowsheetTemplateEpicId")
+    .is_in([2108002828, 21080028316])
+    ).select("Arb_EncounterId")
+).to_list()
+
+# If the Encounter id is in the list, set to 1 otherwise 0
+visits = visits.with_columns(
+    pl.when(pl.col("Arb_EncounterId").is_in(wmq_encs))
+    .then(pl.lit(1))
+    .otherwise(0)
+    .alias("WPV_WMQ")
+)
+
+# Get the flowsheet ids associated OBHPI
+obhpi_ids = pl.Series(
+    flowsheet_ids
+    .filter(pl.col("obesity_brief_HPI") == "X")
+    .select("Flowsheet_RowID")
+).to_list()
+
+# Get the encounter ids associated with OBHPI
+obhpi_encs = pl.Series(
+    flowsheets
+    .filter(
+    pl.col("FlowsheetRowEpicId")
+    .is_in(obhpi_ids)
+    ).select("Arb_EncounterId")
+    ).to_list()
+
+# If the Encounter id is in the list, set to 1 otherwise 0
+vists = visits.with_columns(
+    pl.when(pl.col("Arb_EncounterId").is_in(obhpi_encs))
+    .then(pl.lit(1))
+    .otherwise(0)
+    .alias("WPV_OBHPI")
+)
+
+# %% WPV Visit Type
+
+
+# %%
 # WPV Smart
 # WPV na weight
 # WPV Row Sums

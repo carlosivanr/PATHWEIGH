@@ -16,19 +16,19 @@ pacman::p_load(here,         # For managing directory paths
 ```
 
 ```{r}
-clinic_engagement <- read_csv("S:/FM/PATHWEIGH/Quantitative/Projects/working_files/clinic_engagement.csv", col_types = cols())
+clinic_engagement <- read_csv("D:/PATHWEIGH//working_files/clinic_engagement.csv", col_types = cols())
 ```
 
 
 ```{r}
 # Set the project root to be used as an input to the load() function
-proj_root <- "S:/FM/PATHWEIGH/Quantitative/Projects/"
+proj_root <- "D:/PATHWEIGH//"
 
 # Set the data delivery date to the appropriate data set
 delivery <- params$delivery
 
 # Load visits post id -----------------------------------------------------------
-load(str_c(proj_root, "dataset_", delivery, "/data/processed_visits_post_id_", delivery, ".Rdata"))
+load(str_c(proj_root, "delivery_", delivery, "/data/processed_visits_post_id_", delivery, ".Rdata"))
 ```
 
 ```{r}

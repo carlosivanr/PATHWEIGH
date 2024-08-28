@@ -30,45 +30,11 @@ set_any_pw_visit <- function(data){
   
   # Set PW_Visit as binary indicator of whether or not the visit was associated
   # with one of the 3 types of pathweigh tools.
+  # WPV_PW_flow and WPV_WMQ are the same thing, except that one is discovered
+  # through a template id the refers to the entire questionnaire and another 
+  # through an epic id that refers to a specific question from a questionnaire
   data %<>%
-    mutate(PW_Visit = if_else(WPV_WMQ == 1 | WPV_IP == 1 | WPV_TH == 1 | WPV_smart == 1, 1, 0)) 
-  
-  
-  # # Pull the Arb_PersonIds of those that had a PW_Visit in non-censored visits
-  # # As of 03/26/2024 3,344 unique patients had at least one PW visit
-  # pw_ids <- data %>%
-  #   filter(PW_Visit == 1,
-  #          Censored == 0) %>%
-  #   distinct(Arb_PersonId) %>%
-  #   pull(Arb_PersonId)
-  # 
-  #     
-  # # Extract the date of the first PW visit
-  # PW_Ind_Dates <- 
-  # data %>%
-  #   filter(Arb_PersonId %in% pw_ids) %>%
-  #   select(Arb_PersonId, Arb_EncounterId, EncounterDate, Intervention, PW_Visit) %>%
-  #   group_by(Arb_PersonId, PW_Visit) %>%
-  #   arrange(EncounterDate) %>%
-  #   slice_head() %>%
-  #   ungroup() %>%
-  #   mutate(PW_Ind_Date = EncounterDate) %>%
-  #   select(Arb_PersonId, PW_Ind_Date)
-  # 
-  # 
-  # # Merge PW Index Dates into data and clean up variables
-  # data %<>%
-  #   left_join(., PW_Ind_Dates, by = "Arb_PersonId") %>%
-  #   # select(Arb_PersonId, EncounterDate, starts_with("WPV"), PW_Visit, PW_Ind_Date) %>%
-  #   mutate(Any_PW_Visit = if_else(EncounterDate >= PW_Ind_Date & Intervention == 1, 1, 0),
-  #          Any_PW_Visit = if_else(is.na(Any_PW_Visit), 0, Any_PW_Visit))
-  # 
-  # # Display a warning if there are patients in the control phase that have a
-  # # Any_PW_Visit of 1
-  # if((data %>% filter(Censored == 0, Intervention == 0, Any_PW_Visit ==1) %>% nrow()) != 0){
-  #   stop("Patients in control phase with PW visits detected. Revise code.")
-  # }
-
+    mutate(PW_Visit = if_else(WPV_PW_flow == 1 | WPV_WMQ == 1 | WPV_IP == 1 | WPV_TH == 1 | WPV_smart == 1, 1, 0)) 
   
   return(data)
 }

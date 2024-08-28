@@ -294,7 +294,7 @@ make_tables <- function(data){
   # scores
   
   # The .qmd document is located in
-  # "S:/FM/PATHWEIGH/Quantitative/Projects/emr_data_processing/report_layouts/
+  # "D:/PATHWEIGH//emr_data_processing/report_layouts/
   
   # The .qmd document is clinic_engagement.qmd
   
@@ -330,7 +330,7 @@ make_tables <- function(data){
   
   # Figure: LMER observed & predicted values -----------------------------------
   # The .qmd document is located in
-  # "S:/FM/PATHWEIGH/Quantitative/Projects/emr_data_processing/report_layouts/
+  # "D:/PATHWEIGH//emr_data_processing/report_layouts/
   
   # The .qmd document is lmer_model_output_and_figure.qmd
   

@@ -84,39 +84,80 @@ proc_labs_meds_eoss <- function(data){
   # Put dfs into a list and then process -----------------------------------------
   df_list <- list(ind_con, lv_con, ind_int, lv_int)
   
+  rm(ind_con, lv_con, ind_int, lv_int)
+  
   # Set a function with the labs, meds, and eoss functions inside for use with the
   # lapply() function
-  proc_data <- function(temp){
-    temp <- labs_procedures(temp) # error was found here
+  proc_data <- function(temp) {
+    purrr::walk(
+        .x  = c("procedure", "labs", "flowsheets", "referrals", "meds"),
+        .f = read_pw_csv
+        )
+
+    temp <- labs_procedures(temp)
     temp <- capture_medications(temp)
-    temp <- eoss(temp)
+    # temp <- eoss(temp)
     return(temp)
   }
 
-  
-  # Process data in Serial -------------------------------------------------------
-  # parallel processing with furrr package was not feasible due to copying the global 
-  # environment variables for each session
-  # df_list <- lapply(df_list, proc_data)
-  # # Pare down flowsheets
-  # flowsheets %<>% 
-  #   filter(Arb_PersonId %in% data$Arb_PersonId)
-  # 
-  # # Pare down labs
-  # labs %<>% 
-  #   filter(Arb_PersonId %in% data$Arb_PersonId)
-  # 
-  # # Pare down dx, dx co
-  # dxco %<>%
-  #   filter(Arb_PersonId %in% data$Arb_PersonId)
-  # 
-  # dx %<>%
-  #   filter(Arb_PersonId %in% data$Arb_PersonId)
-  # 
-  # invisible(gc())
-  
   # Apply proc_data to each data frame in df_list
-  df_list <- map(df_list, proc_data)
+  # df_list <- map(df_list, proc_data)
+  # Took 981.2 seconds (16 minutes) w out eoss
+  # tic()
+  # seq_test <- map(df_list, proc_data)
+  # beepr::beep(sound = 2)
+  # toc()
+  
+  # Testing to process in parallel
+  # 347.59 seconds (6 minutes) w out eoss
+  # This is the best implementation of this function
+  # now just fix the eoss part without loading data frames
+  # W eoss time is 546.59 second
+  # eoss takes the longest, setting max size to 12gb
+  plan(multisession, workers = 4)
+  options(future.rng.onMisuse = "ignore",
+          future.globals.maxSize = (1200*1024^2)
+          )
+  
+  df_list <-
+  c(1,2,3,4) %>%
+    future_map(~ df_list[[.x]] %>% proc_data(.))
+  beepr::beep(sound = 2)
+  
+  # rm(procedure, labs, flowsheets, referrals, meds)
+
+  invisible(gc())
+  
+  # process eoss separately
+  proc_data <- function(temp) {
+    purrr::walk(
+      .x  = c("dx", "dxco", "meds"),
+      .f = read_pw_csv
+    )
+    
+    temp <- eoss(temp)
+    
+    return(temp)
+  }
+  
+  tic()
+  df_list <-
+    c(1,2,3,4) %>%
+    future_map(~ df_list[[.x]] %>% proc_data(.))
+  beepr::beep(sound = 2)
+  toc()
+  
+  
+# Other option is to assign a group to each
+# ind_con, ind_int, lv_con, lv_int data frame
+# then stack them together instead of putting 
+# them in a list. 
+# df %>%
+# split(.$group) %>%
+# future_map_dfr(~proc_data(.))
+
+
+
   
   
   # Clean up data before stitching------------------------------------------------
@@ -194,11 +235,6 @@ proc_labs_meds_eoss <- function(data){
     ungroup() %>%
     select(-Cohort_end_date)
 
-  # Clear out any temporary data frames and memory resources
-  rm(linked_visits, non_linked_visits, linked_visit_ids, 
-     lv_int, lv_con, ind_int, ind_con, df_list)
   
   return(temp_data)
 }
-
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

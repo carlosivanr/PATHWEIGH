@@ -39,8 +39,9 @@ visits %<>%
       (GroupID == 3 & EncounterDate < "2023-03-17"), 0, 1))
 
 visits %<>%
-  mutate(Intervention.factor = as_factor(
-    case_match(Intervention, 0 ~ "Control", 1 ~ "Intervention")))
+  mutate(Intervention.factor = factor(
+    ifelse(Intervention == 1, "Intervention", "Control"),
+    levels = c("Control", "Intervention")))
 
 # Set Eligibility for Index Visits and restrict Weight and Height --------------
 # At this stage, the Eligible flag is to identify eligible encounters, not
