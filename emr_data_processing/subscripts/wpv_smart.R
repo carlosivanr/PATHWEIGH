@@ -17,52 +17,11 @@
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-wpv_smart <- function(temp){
-  if (RData == "20240326.RData"){
-    
-    # Reverted back to original algorithm that classifies any visit with
-    # smart tool use as WPV_smart == 1
-    temp %<>%
-      mutate(WPV_smart = 
-               ifelse(Arb_EncounterId %in% smart$Arb_EncounterId & 
-                        Intervention == 1, 1, 0))
-    # 
-    # # List the structure of summary
-    # # str(temp)
-    # 
-    # # Display the encounters with the values of Flag and Name
-    # smart %>%
-    #   select(Flag, Name) %>%
-    #   tbl_summary()
-    # 
-    # # Display the names of the records where SMARTTEXT is the Flag
-    # smart %>% 
-    #   filter(Flag == "SMARTTEXT") %>% 
-    #   select(Name) %>% 
-    #   tbl_summary()
-    # 
-    # # Disappearing text is identified by Flag == "SMARTTEXT" & Name "AMB WPV NOTE"
-    # smart %>%
-    #   mutate(Type = if_else(Flag == "SMARTTEXT" & Name == "AMB WPV NOTE", "Disappearing Text", "Smart Text"),
-    #          Type = if_else(Flag == "SMARTPHRASE", "Smart Phrase", Type),
-    #          Type = if_else(Flag == "SMARTSET", "Smart Set", Type)) %>%
-    #   select(Type) %>%
-    #   tbl_summary()
-    # 
-    # # create the WPV_smart data element
-    # temp %<>%
-    #   mutate(WPV_smart = 
-    #            ifelse(Arb_EncounterId %in% smart$Arb_EncounterId & 
-    #                     Intervention == 1, 1, 0))
+wpv_smart <- function(temp) {
+  temp %<>%
+    mutate(WPV_smart = ifelse(
+      Arb_EncounterId %in% smart$Arb_EncounterId & Intervention == 1, 1, 0
+    ))
 
-    
-  } else {
-    
-    temp %<>%
-      mutate(WPV_smart = 
-               ifelse(Arb_EncounterId %in% smart$Arb_EncounterId & 
-                        Intervention == 1, 1, 0))
-  }
-    
   return(temp)
 }
