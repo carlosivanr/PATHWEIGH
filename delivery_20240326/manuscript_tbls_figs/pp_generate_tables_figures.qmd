@@ -1,6 +1,9 @@
 ---
 title: "PP Tables & Figures"
-format: docx
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+
 params:
   delivery: 20240326
 
@@ -34,7 +37,6 @@ data <- pp_data
 
 ```
 
-
 ```{r}  
 visits_post_id <- 
   visits_post_id %>%
@@ -43,11 +45,9 @@ visits_post_id <-
 ```
 ### The following output is automated. Some manual manipulation will be needed upon each iteration for the final manuscript
 1. Change BMI kg/m^2 to superscript the 2.
-2. Remove N=7,578 through out the document
-3. Change font
+2. Change font (once all tables/figs are finalized)
 
 # Table: Health metrics at index and last visits
-
 ```{r}
 tab1 <- bind_rows(
 (visits_post_id %>%
@@ -71,7 +71,7 @@ tab1 <- bind_rows(
       tbl_summary(by = Visit,
                   missing = "ifany",
                   type = list(c(PHQ2, PHQ9, GAD7) ~ 'continuous'),
-                  statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+                  statistic = list(all_continuous() ~ c("{mean} ({sd}; {min}; {max})")),
                   label = list(Race_Ethnicity ~ "Race/Ethnicity",
                                   BMI ~ "BMI (kg/m^2)",
                                   Systolic_blood_pressure ~ "Systolic BP (mmHg)",
@@ -79,37 +79,19 @@ tab1 <- bind_rows(
                                   Smoking_Status ~ "Smoking Status"),
                   digits = list(all_categorical() ~ c(0,1),
                                   all_continuous() ~ c(1,1)))
-        ) %>%
+        )
+
+tab1 %<>%
+  modify_header(stat_1_1 = "**Index Visit**",
+                stat_2_1 = "**Final Visit**",
+                stat_1_2 = "**Index Visit**",
+                stat_2_2 = "**Final Visit**") %>%
   as_gt()
 
 tab1
 ```
 
-```{r, eval=FALSE}
-# Need reasonable range for ALT
-visits_post_id %>%
-  filter(Arb_PersonId %in% data$Arb_PersonId, 
-         IndexVisit == 1) %>%
-  # filter(Intervention == "Intervention") %>%
-  select(ALT, Intervention.factor) %>%
-  drop_na() %>%
-  # filter(ALT < 500) %>%
-  ggplot(., aes(y = ALT, color = Intervention.factor)) +
-  geom_boxplot()
-
-# Need reasonable range for AST
-visits_post_id %>%
-  filter(Arb_PersonId %in% data$Arb_PersonId, 
-         IndexVisit == 1) %>%
-  # filter(Intervention == "Intervention") %>%
-  select(AST, Intervention.factor) %>%
-  drop_na() %>%
-  # filter(ALT < 500) %>%
-  ggplot(., aes(y = AST, color = Intervention.factor)) +
-  geom_boxplot()
-```
-
-# Table: Identification of WPVs (OBHPI, WMQ, SMART, etc.) and referrals, procedures, 
+# Table: Identification of WPVs (OBHPI, WMQ, SMART, etc.) and referrals, procedures,
 ```{r}
 # Table 3 WPVs ---------------------------------------------------------------
   # Table 3 is created by merging two separate tables that are created in the
@@ -130,7 +112,7 @@ visits_post_id %>%
     filter(Arb_PersonId %in% (data %>% filter(Intervention == "Intervention") %>% distinct(Arb_PersonId) %>% pull(Arb_PersonId))) %>%
     filter(Intervention.factor == "Intervention",
            IndexVisit == 1)
-  
+
   ## Create wpv_data by stacking index visits in control and in intervention ----
   # wpv_data <- bind_rows(wpv_con_ind, wpv_int_ind)
 
@@ -182,9 +164,8 @@ visits_post_id %>%
       )
 ```
 
-
 ```{r}
-tab2b <- 
+tab2b <-
   c("Control", "Intervention") %>%
     purrr::map_df(
       ~visits_post_id %>%
@@ -216,9 +197,14 @@ tab2b <-
 
 ```{r}
 tbls <- list(tab2a[[1]], tab2b) # because tab2a is a list, needs to be indexed
-tbl_stack(tbls) %>% as_gt()
-```
 
+tbl_stack(tbls) %>%
+  modify_header(
+      stat_1 = "**Control**",
+      stat_2 = "**Intervention**"
+  ) %>%
+  as_gt()
+```
 
 # Figure: Clinic Engagement
 ```{r}
@@ -228,7 +214,7 @@ clinic_engagement <- read_csv("D:/PATHWEIGH/working_files/clinic_engagement.csv"
 ```{r}
 # Drop any aberrant rows that may have been loaded, but not necessarily part
 # of the data set of interest.
-clinic_engagement %<>% 
+clinic_engagement %<>%
   drop_na(DeptNameEpicId)
 
 # Update the clinic visit counts in mod_data and merge with clinic_engagement
@@ -246,7 +232,6 @@ clinic_engagement %<>%
   left_join(., cohort_vals, by = "DepartmentEpicId")
 ```
 
-
 ```{r}
 # Number of clinics per cohort
 cohort_n <- clinic_engagement %>%
@@ -254,7 +239,6 @@ cohort_n <- clinic_engagement %>%
   count() %>%
   mutate(Cohort_n = str_c(Cohort, ": n = ", n))
 ```
-
 
 ```{r}
 # Histogram as percentages
@@ -265,15 +249,14 @@ hist <- clinic_engagement %>%
            Cohort = factor(Cohort_n))
 ```
 
-
 ```{r, warning=FALSE, message=FALSE, fig.dpi = 600, fig.width=6.5, fig1}
 # Calculate percentage where the denominator is total in each respective cohort
 hist %>%
   group_by(Cohort, Engagement) %>%
   summarise(n = n()) %>%
   mutate(freq = n / sum(n)) %>%
-  ggplot(., aes(x = Engagement, y=freq, fill=Cohort)) + 
-  geom_bar(stat="identity",position=position_dodge2(preserve = "single")) + 
+  ggplot(., aes(x = Engagement, y=freq, fill=Cohort)) +
+  geom_bar(stat="identity",position=position_dodge2(preserve = "single")) +
   scale_y_continuous(labels = scales::label_percent()) +
   theme_minimal() +
   ylab("Percentage of clinics within cohort") +
@@ -282,20 +265,20 @@ hist %>%
 ```
 Caption: Engagement scores defined as the sum (0 -8) of a binary indicator of several measures of engagement. Measures of engagement include 1) Zoom intro meeting, 2) In-person clinic visit from a member of the PATHWEIGH team, 3) Requested support from PATHWEIGH clinical team, 4) Used PATHWEIGH e-Learning module, 5) WOF training, 6) use of PATHWEIGH Placard, 7) Attended learning community, 8) Chose practice champion.
 
-# Model output
+# ITT model
 ```{r}
-# Redefine slope 1, slope 2, slope 3 in pp_mod_data since these variables came 
-# from the loaded ee modeling dataset
+
+
+# Redefine slope 1 and slope 2
 pp_mod_data %<>%
   mutate(slope1 = ifelse(Intervention == "Control", 1, 0),
-         slope2 = ifelse(pw == 1 & Intervention == "Intervention", 1, 0),
-         slope3 = ifelse(pw == 0 & Intervention == "Intervention", 1, 0),
+         slope2 = ifelse(Intervention == "Intervention", 1, 0)
          )
 ```
 
 ```{r}
 # Create binary variables
-pp_mod_data %<>% 
+pp_mod_data %<>%
   mutate(age_lt_45 = ifelse(Age_cat == "<=45", 1, 0),
          age_45_to_60 = ifelse(Age_cat == "45-60", 1, 0),
          age_gt_60 = ifelse(Age_cat == ">60", 1, 0),
@@ -315,34 +298,33 @@ pp_mod_data %<>%
 
 ```{r}
 # Linear mixed model with binary variables
-lmer_mod_bin <- lmerTest::lmer(Weight_dv ~ 
-                   
+lmer_mod_bin <- lmerTest::lmer(Weight_dv ~
+
           # age
-          age_45_to_60 + age_gt_60 + 
-           
+          age_45_to_60 + age_gt_60 +
+
           # sex
-          sex_m + 
-          
+          sex_m +
+
           # race ethnicity
-          reth_his + reth_blk + reth_asn + reth_oth + reth_ukn + 
-           
+          reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
           # year at index
-          year_at_ind1 + year_at_ind2 + year_at_ind3 + 
-           
+          year_at_ind1 + year_at_ind2 + year_at_ind3 +
+
           # Weight at baseline
           Weight_bl + slope1 +
-             
+
           # Slope1 is the same as Phase/Intervention group
-          slope1:N_days_post_id + slope1:N_days_post_180 + 
-          
+          slope1:N_days_post_id + slope1:N_days_post_180 +
+
           # Slope2 is the opposi
-          slope2:N_days_post_id + slope2:N_days_post_180 + 
-          
-          
-          # Clustering, convergence issues with both dept and personid   
+          slope2:N_days_post_id + slope2:N_days_post_180 +
+
+          # Clustering, convergence issues with both dept and personid
           # (1| DepartmentExternalName) + (1| Arb_PersonId),
           (1| Arb_PersonId),
-                
+
           # Input data frame
           data=pp_mod_data
           )
@@ -350,91 +332,97 @@ lmer_mod_bin <- lmerTest::lmer(Weight_dv ~
 # broom.mixed::tidy(lmer_mod_bin)
 ```
 
-# Table: Model Output
 ```{r}
-model_output <- broom.mixed::tidy(lmer_mod_bin)
-```
+# Declare model output and table formatting functions
 
-```{r}
-# Set a vector for term labels of the binary variables that were not included in 
-# the model because its not necessary to include sex_f and sex_m in the formula.
-# These terms are added for completeness when building the final output table
-# and are used to create an ordered vector of terms for displaying the table.
-term <- c("age_lt_45",
-  "sex_f",
-  "reth_nhw",
-  "year_at_ind0")
-
-model_terms <- model_output %>% pull(term)
-
-# Set the order of the terms to organize them in a subsequent table
-ordered_terms <- c(
-  model_terms[1],
-  term[1],
-  model_terms[2:3],
-  term[2],
-  model_terms[4],
-  term[3],
-  model_terms[5:9],
-  term[4],
-  model_terms[10:20]
-)
-
-# Create the main table
-# stack the vector terms with model_output
-tab <- bind_rows(model_output, 
-          (data.frame(term) %>% 
-             mutate(effect = "fixed"))) %>% 
+# Part 1
+prep_mdl_out <- function(model_output) {
+  # Set a vector for term labels of the binary variables that were not included in
+  # the model because its not necessary to include sex_f and sex_m in the formula.
+  # These terms are added for completeness when building the final output table
+  # and are used to create an ordered vector of terms for displaying the table.
+  term <- c("age_lt_45",
+    "sex_f",
+    "reth_nhw",
+    "year_at_ind0")
   
-  # Arrange the terms in the previous step to the pre-specified orer
-  arrange((factor(term, levels = ordered_terms))) %>% 
+  model_terms <- model_output %>% pull(term)
   
-  # remove columns that are not needed for display
-  select(-effect, -group, -statistic, -df) %>% 
+  # Set the order of the terms to organize them in a subsequent table
+  ordered_terms <- c(
+    model_terms[1],
+    term[1],
+    model_terms[2:3],
+    term[2],
+    model_terms[4],
+    term[3],
+    model_terms[5:9],
+    term[4],
+    model_terms[10:20]
+  )
   
-  # remove rows that are not needed for display
-  filter(!term %in% c("sd__(Intercept)", "sd__Observation")) %>%
+  # Create the main table
+  # stack the vector terms with model_output
+  tab <- 
+    bind_rows(model_output,
+              (data.frame(term) %>%
+               mutate(effect = "fixed"))
+              ) %>%
   
-  # convert the estimate for N_days_* to N_months_*
-  mutate(estimate = ifelse(grepl("N_days_post", term), estimate * 30, estimate)) %>%
-  mutate(std.error = ifelse(grepl("N_days_post", term), std.error * 30, std.error)) %>%
+    # Arrange the terms in the previous step to the pre-specified orer
+    arrange((factor(term, levels = ordered_terms))) %>%
   
-  # round values
-  mutate(across(estimate:p.value, ~round(., 3))) %>%
+    # remove columns that are not needed for display
+    select(-effect, -group, -statistic, -df) %>%
+  
+    # remove rows that are not needed for display
+    filter(!term %in% c("sd__(Intercept)", "sd__Observation")) %>%
+  
+    # convert the estimate for N_days_* to N_months_*
+    mutate(estimate = ifelse(grepl("N_days_post", term), estimate * 30, estimate)) %>%
+    mutate(std.error = ifelse(grepl("N_days_post", term), std.error * 30, std.error)) %>%
+  
+    # round values
+    mutate(across(estimate:p.value, ~round(., 3))) %>%
+  
+    # convert term N_days_* to N_months_* and slope* to human readable
+    mutate(term = str_replace(term, "N_days_post_id", "N_months_post_id"),
+           term = str_replace(term, "N_days_post_180", "N_months_post_180"),
+           # term = str_replace(term, "slope1", "Control"),
+           # term = str_replace(term, "slope2", "Intervention")
+           ) %>%
+  
+    # relabel all of the values in the "term" column
+    mutate(term = case_when(
+      term == "age_lt_45" ~ "<45",
+      term == "age_45_to_60" ~ "[45, 60)",
+      term == "age_gt_60" ~ ">60",
+      term == "sex_f" ~ "Female",
+      term == "sex_m" ~ "Male",
+      term == "reth_nhw" ~ "NonHispanicWhite",
+      term == "reth_his" ~ "Hispanic",
+      term == "reth_blk" ~ "Black",
+      term == "reth_asn" ~ "Asian",
+      term == "reth_oth" ~ "Other",
+      term == "reth_ukn" ~ "Unknown",
+      term == "year_at_ind0" ~ "0",
+      term == "year_at_ind1" ~ "1",
+      term == "year_at_ind2" ~ "2",
+      term == "year_at_ind3" ~ "3",
+      term == "Weight_bl" ~ "Weight_bl (kg)",
+      .default = term))
+    
+  return(tab)
+    
+}
 
-  # convert term N_days_* to N_months_* and slope* to human readable
-  mutate(term = str_replace(term, "N_days_post_id", "N_months_post_id"),
-         term = str_replace(term, "N_days_post_180", "N_months_post_180"),
-         term = str_replace(term, "slope1", "Control"),
-         term = str_replace(term, "slope2", "Int_PW"),
-         term = str_replace(term, "slope3", "Int_No_PW")) %>% 
-  
-  # relabel all of the values in the "term" column
-  mutate(term = case_when(
-    term == "age_lt_45" ~ "<45",
-    term == "age_45_to_60" ~ "[45, 60)",
-    term == "age_gt_60" ~ ">60",
-    term == "sex_f" ~ "Female",
-    term == "sex_m" ~ "Male",
-    term == "reth_nhw" ~ "NonHispanicWhite",
-    term == "reth_his" ~ "Hispanic",
-    term == "reth_blk" ~ "Black",
-    term == "reth_asn" ~ "Asian",
-    term == "reth_oth" ~ "Other",
-    term == "reth_ukn" ~ "Unknown",
-    term == "year_at_ind0" ~ "0",
-    term == "year_at_ind1" ~ "1",
-    term == "year_at_ind2" ~ "2",
-    term == "year_at_ind3" ~ "3",
-    term == "Weight_bl" ~ "Weight_bl (kg)",
-    term == "Intr" ~ "Intervention",
-    .default = term))
-```
+# Part 2
+# Manually change slope terms
 
-
-```{r}
-# Add grouping rows for the following terms
-tab %>%
+# Part 3
+fmt_tab <- function(tab, title) {
+  # Add grouping rows for the following terms
+  tab %>%
   mutate(across(estimate:std.error, ~ as.character(.))) %>%
   mutate(across(p.value, ~sprintf("%.3f", .))) %>% # Converting to character, but preserve the trailing zeros
   gt::gt(rowname_col = "term") %>%
@@ -464,64 +452,110 @@ tab %>%
     p.value = "",
     .before = "0") %>%
   gt::tab_header(
-    title = "ITT Model",
+    title = title,
     # subtitle = "subtitle place holder"
+  )
+}
+```
+
+# Table: Model Output
+```{r}
+model_output <- broom.mixed::tidy(lmer_mod_bin)
+```
+
+```{r}
+tab <- prep_mdl_out(model_output)
+```
+
+```{r}
+# Clean up the terms containing "slope" since each model will have different
+# meanings for slope 1, or 2, or 3
+tab %<>%
+  mutate(term = str_replace(term, "slope1", "Control"),
+         term = str_replace(term, "slope2", "Intervention")
   )
 ```
 
-# Figure: Model figure
-
 ```{r}
-# Plot with 3 panels. The first two panels are the control and intervention
-# data from the pp_mod_data. The 3rd panel is the intervention data from the
-# subset that received Pw.
-# 
+tab %>%
+  fmt_tab(., "ITT Model")
 ```
 
-
+# Figure: Model figure
 ```{r}
 # Create figure of observed vs predicted values
 predicted <- predict(lmer_mod_bin, pp_mod_data, re.form=NA, type="response")
 
 obs_pred <- bind_cols(pp_mod_data, data.frame(predicted)) %>%
-  mutate(observed = Weight_dv)
+  mutate(observed = Weight_dv) %>%
+  select(Arb_PersonId, N_months_post_id, observed, predicted, Intervention)
 ```
 
-```{r}
-plot_data <- 
-  obs_pred %>%
-  select(Arb_PersonId, N_months_post_id, observed, predicted, Intervention) %>%
+### All panels display predicted values from the ITT model.
+```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
+ylims <- c(100, 113)
+
+pan_a <- obs_pred  %>%
   group_by(Intervention, N_months_post_id) %>%
   summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
-  pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs")
-  # # filter(N_months_post_id < 5, Intervention == "Control") %>%
-  # ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type, )) +
-  # # geom_point() +
-  # geom_line() +
-  # facet_wrap(~Intervention) +
-  # theme_minimal()
-```
-
-```{r, fig.width=6.5, fig.dpi = 600}
-# Plot of Int_PW from the same model
-bind_rows(
-  plot_data,
-  (obs_pred %>%
-  filter(pw == 1) %>%
-  select(Arb_PersonId, N_months_post_id, observed, predicted) %>%
-  group_by(N_months_post_id) %>%
-  summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
   pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
-  mutate(Intervention = "Int_PW"))) %>%
-  mutate(Intervention = factor(Intervention, levels = c("Control", "Intervention", "Int_PW"))) %>%
-  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type, )) +
+  # filter(N_months_post_id < 5, Intervention == "Control") %>%
+  filter(Type == "observed") %>%
+  # ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type, )) +
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs)) +
+  # geom_point() +
   geom_line() +
   facet_wrap(~Intervention) +
-  theme_minimal()
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  ylim(ylims)
 ```
+
 ```{r}
-# Redefine slope 1, slope 2, slope 3 in pp_mod_data since thes variables came 
-# from the loaded ee modeling dataset
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since covariates
+# are time invarying within phase, it's not necessary to capture the index visit
+
+overlay_data <- 
+pp_mod_data %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3,
+       Weight_bl, slope1, slope2, Phase,
+       N_days_post_id, N_days_post_180) %>%
+  group_by(Phase) %>%
+  summarise_all(mean, .groups = "drop") %>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_days_post_id = rep(c(0,180,540), 2)) %>%
+  mutate(N_days_post_180 = rep(c(0,0,360),2))
+
+# Get the predicted values
+predicted <- predict(lmer_mod_bin, overlay_data, re.form = NA, type = "response")
+
+# Create a data frame of the plotting data
+overlay_data <-
+  bind_cols(overlay_data, data.frame(predicted))
+
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_days_post_id, predicted, slope1) %>%
+  rename(N_months_post_id = N_days_post_id,
+         Avg_Weight_kgs = predicted) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18),2),
+         Intervention = ifelse(slope1 == 1, "Control", "Intervention"),
+         Type = "predicted") %>%
+  select(Intervention, N_months_post_id, Type, Avg_Weight_kgs)
+```
+
+```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
+pan_a +
+  geom_line(data = overlay_data, color = "blue")
+```
+
+# 3-slopes model
+```{r}
+# Redefine slope 1, slope 2, slope 3 in pp_mod_data to model three groups
 pp_mod_data %<>%
   mutate(slope1 = ifelse(Intervention == "Control", 1, 0),
          slope2 = ifelse(pw == 1 & Intervention == "Intervention", 1, 0),
@@ -530,39 +564,40 @@ pp_mod_data %<>%
 ```
 
 ```{r}
+# 3 Slopes Model
 # PP model with patients that have both control and intervention visits
 # Linear mixed model with binary variables
-lmer_mod_bin <- lmerTest::lmer(Weight_dv ~ 
-                   
+lmer_mod_bin3 <- lmerTest::lmer(Weight_dv ~
+
           # age
-          age_45_to_60 + age_gt_60 + 
-           
+          age_45_to_60 + age_gt_60 +
+
           # sex
-          sex_m + 
-          
+          sex_m +
+
           # race ethnicity
-          reth_his + reth_blk + reth_asn + reth_oth + reth_ukn + 
-           
+          reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
           # year at index
-          year_at_ind1 + year_at_ind2 + year_at_ind3 + 
-           
+          year_at_ind1 + year_at_ind2 + year_at_ind3 +
+
           # Weight at baseline
           Weight_bl + slope1 +
-             
+
           # Slope1 is the same as Phase/Intervention group
-          slope1:N_days_post_id + slope1:N_days_post_180 + 
-          
+          slope1:N_days_post_id + slope1:N_days_post_180 +
+
           # Slope2 is the opposi
-          slope2:N_days_post_id + slope2:N_days_post_180 + 
-            
+          slope2:N_days_post_id + slope2:N_days_post_180 +
+
           # 3 - Intervention group no PW tools
-          slope3:N_days_post_id + slope3:N_days_post_180 + 
-          
-          
-          # Clustering, convergence issues with both dept and personid   
+          slope3:N_days_post_id + slope3:N_days_post_180 +
+
+
+          # Clustering, convergence issues with both dept and personid
           # (1| DepartmentExternalName) + (1| Arb_PersonId),
           (1| Arb_PersonId),
-                
+
           # Input data frame
           data=pp_mod_data
           )
@@ -570,40 +605,177 @@ lmer_mod_bin <- lmerTest::lmer(Weight_dv ~
 
 ```{r}
 # Create figure of observed vs predicted values
-predicted <- predict(lmer_mod_bin, pp_mod_data, re.form=NA, type="response")
+predicted <- predict(lmer_mod_bin3, pp_mod_data, re.form=NA, type="response")
 
 obs_pred <- bind_cols(pp_mod_data, data.frame(predicted)) %>%
   mutate(observed = Weight_dv)
+```
 
-obs_pred <- obs_pred %>% filter(pw == 1)
+# Table: Model Output
+```{r}
+model_output <- broom.mixed::tidy(lmer_mod_bin3)
+```
+
+```{r}
+# Prep the model output
+tab <- prep_mdl_out(model_output)
+
+# Manually modify the slope terms
+tab %<>%
+  mutate(term = str_replace(term, "slope1", "Control"),
+         term = str_replace(term, "slope2", "Int_PW"),
+         term = str_replace(term, "slope3", "Int_No_PW")
+         ) 
+```
+
+```{r}
+# Grab slopes in the output table before converting to gt table
+slopes <- tab %>%
+  filter(grepl(":", term)) %>%
+  select(term, estimate)
+
+slopes <- left_join(
+(slopes %>%
+  mutate(group = c("Con", "Con", "Int_PW", "Int_PW", "Int_nPW", "Int_nPW")) %>%
+  group_by(group) %>%
+  slice_head() %>%
+  ungroup()),
+# Get the estimates for after 6 months
+(slopes %>%
+  mutate(group = c("Con", "Con", "Int_PW", "Int_PW", "Int_nPW", "Int_nPW")) %>%
+  group_by(group) %>%
+  summarise(post_180_estimate = sum(estimate))),
+by = "group"
+ ) 
+```
+
+```{r}
+# Add grouping rows for the following terms
+tab %>%
+  fmt_tab(., "3-Slope Model")
+```
+
+### All panels display predicted values from 3-slope model
+```{r, fig.height = 6, fig.width=6.5, fig.dpi = 600}
+# 3-line plot of the per-protocol model
+pan_b <- obs_pred %>%
+  mutate(group = ifelse(slope1 == 1, "Con", NA),
+         group = ifelse(slope2 == 1, "Int_PW", group),
+         group = ifelse(slope3 == 1, "Int_nPW", group)) %>%
+  select(Arb_PersonId, N_months_post_id, observed, predicted, Intervention, group) %>%
+  group_by(group, Intervention, N_months_post_id) %>%
+  summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
+  pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
+  filter(Type == "observed") %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs)) +
+  geom_line() +
+  facet_wrap(~group) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  ylim(ylims)
+```
+
+```{r}
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since covariates
+# are time invarying within phase, it's not necessary to capture the index visit
+overlay_data <-
+pp_mod_data %>%
+  mutate(group = ifelse(slope1 == 1, "Con", NA),
+         group = ifelse(slope2 == 1, "Int_PW", group),
+         group = ifelse(slope3 == 1, "Int_nPW", group)) %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3,
+       Weight_bl, slope1, slope2, slope3,
+       N_days_post_id, N_days_post_180, group) %>%
+  group_by(group) %>%
+  summarise_all(mean, .groups = "drop")
+
+# overlay_data %>%
+#   gt::gt()
+```
+
+```{r}
+# Model predictions are done with N_days_post_* not N_months
+# duplicate rows to make predictions as 0, 6, and 18 months
+# Average visit in each phase at three different timepoints
+overlay_data %<>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_days_post_id = rep(c(0,180,540), 3)) %>%
+  mutate(N_days_post_180 = rep(c(0,0,360), 3))
+# 
+# overlay_data %>%
+#   gt::gt()
+```
+
+```{r}
+# Get the predicted values
+predicted <- predict(lmer_mod_bin3, overlay_data, re.form = NA, type = "response")
+
+# Create a data frame of the plotting data
+overlay_data <-
+  bind_cols(overlay_data, data.frame(predicted))
+
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_days_post_id, predicted, group) %>%
+  rename(N_months_post_id = N_days_post_id,
+         Avg_Weight_kgs = predicted) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18), 3),
+         Type = "predicted") %>%
+  select(group, N_months_post_id, Type, Avg_Weight_kgs)
+```
+
+```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
+# 3 slopes plot with blue trend lines only
+# pan_b +
+#   geom_line(data = overlay_data, color = "blue")
+```
+
+```{r}
+# Slopes data captured upstream in Table: Model Output section
+slopes %<>%
+  mutate(lab = str_c("Rate of change\n0-6mo: ", estimate, " kg/month\n6-18mo: ", post_180_estimate, " kg/month")) %>%
+  mutate(Avg_Weight_kgs = ifelse(term == "Control:N_months_post_id", 107.5, 
+                                   ifelse(term == "N_months_post_id:Int_No_PW", 106, 110)),
+         N_months_post_id = 1.5)
 ```
 
 
-```{r, fig.width=6.5, fig.dpi = 600}
-# 3-line plot of the per-protocol model
-bind_rows(plot_data,
-(obs_pred %>%
-  select(Arb_PersonId, N_months_post_id, observed, predicted) %>%
-  group_by(N_months_post_id) %>%
-  summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
-  pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
-  mutate(Intervention = "Int_PW"))) %>%
-  mutate(Intervention = factor(Intervention, levels = c("Control", "Intervention", "Int_PW"))) %>%
-  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type, )) +
-  geom_line() +
-  facet_wrap(~Intervention) +
-  theme_minimal()
+```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
+pan_b +
+  geom_line(data = overlay_data, color = "blue") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_Weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2)
+```
+
+```{r, fig.height= 10, fig.width=6.5, dpi = 600}
+# Tried to arrange sub plot into one figure, but the scaling on each
+# plot panel is different
+# ggpubr::ggarrange(
+#   pan_a, pan_b,
+#   common.legend = TRUE,
+#   ncol = 1,
+#   nrow = 2,
+#   labels = c("A", "B")
+# )
 ```
 
 ```{r, fig.width=6.5, eval=FALSE, echo = FALSE}
 # # 4-line plot of PW and nPW in intervention and control groups
-# pw_ids <- 
+# pw_ids <-
 #   pp_data %>%
 #   mutate(PW_Visit = if_else(WPV_WMQ == 1 | WPV_PW_flow ==1 | WPV_IP == 1 | WPV_TH == 1 | WPV_smart == 1, 1, 0)) %>%
 #   filter(PW_Visit == 1) %>%
 #   distinct(Arb_PersonId) %>%
 #   pull(Arb_PersonId)
-# 
+#
 # obs_pred %>%
 #   mutate(pw = ifelse(Arb_PersonId %in% pw_ids, "PW", "nPW"))%>%
 #   select(Arb_PersonId, N_months_post_id, observed, predicted, Intervention, pw) %>%
@@ -619,8 +791,3 @@ bind_rows(plot_data,
 #   theme(legend.position = "bottom") +
 #   labs(color = "", linetype = "")
 ```
-
-
-# Additional tables
-## Supplement: Comorbidities
-## Weight at the index
