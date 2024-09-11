@@ -1,3 +1,19 @@
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# Carlos Rodriguez, Ph.D. CU Anschutz Dept. of Family Medicine
+# Description:
+# This script will do the following
+# 2. Create N_days after the IndexVisit
+# 3. Create N_months after the IndexVisit
+# 4. Create Year and Quarter variables
+# 5. Create Censor variable
+# 6. Create the LastVisit indicator variable
+# 7. Create N_months after the last visit
+# 8. Capture the labs, medications and EOSS at the index and last visits in 
+#     each phase
+# 9. Capture comorbidities at the index and last visits in each phase
+# 10. Create Weight_kgs variable
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 prep_ee_ene <- function(data) {
 
   # Censor visits --------------------------------------------------------------
@@ -62,7 +78,6 @@ prep_ee_ene <- function(data) {
   # for any visit to capture labs, procedures, medications, etc.
   data <- set_last_visit(data)
 
-
   # Categorize N_months_post_lv ------------------------------------------------
   # n.b. will only calculate for observations that are the last visit
   # could try a group_by(Arb_PersonId, Intervention) %>% fill() if those values
@@ -72,30 +87,25 @@ prep_ee_ene <- function(data) {
       N_months_post_lv =
         ifelse(LastVisit == 1,
           round(as.numeric(EncounterDate - IndexDate) / 30, digits = 0),
-          NA)
-    ) %>%
+          NA)) %>%
     mutate(N_months_post_lv_cat = case_when(
       N_months_post_lv < 7 ~ "0-6",
       N_months_post_lv >= 7 & N_months_post_lv < 12 ~ "7-12",
       N_months_post_lv >= 13 & N_months_post_lv < 18 ~ "13-18",
       N_months_post_lv > 18 ~ "18+"
     ))
-  
+
   # Modify the weight variable ---------------------------------------------
   # Modifies the weight variable in the input data frame so that the
   # weight value captured at the baseline index visit is set to be used as a
   # covariate and the weight values from non-index visits are set to be used as
   # dependent variables.
-  # data %>%
-  #   filter(IndexVisit == 1) %>%
-  #   filter(is.na(Weight)) %>%
-  #   nrow()
-  
+
   data %<>%
     # select(IndexVisit, Weight_kgs) %>%
     mutate(Weight_bl = ifelse(IndexVisit == 1, Weight_kgs, NA),
            Weight_dv = ifelse(IndexVisit != 1, Weight_kgs, NA))
-  
+
   # Fill the NA Weight_bl values with the available value at the index visit
   # in each intervention phase
   data %<>%
@@ -103,12 +113,11 @@ prep_ee_ene <- function(data) {
     arrange(Intervention, desc(IndexVisit), EncounterDate) %>%
     fill(Weight_bl, .direction = "down") %>%
     ungroup()
-  
-  
+
   # Create Any_PW_Visit variable -------------------------------------------
   # ***> Needs additional development CR 07/09/2024
   # Current version only specifies whether or not the visit was a PW visit.
-  data %<>% 
+  data %<>%
     set_any_pw_visit(.)
 
   return(data)
