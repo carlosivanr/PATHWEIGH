@@ -8,7 +8,7 @@
 # 5. Create Censor variable
 # 6. Create the LastVisit indicator variable
 # 7. Create N_months after the last visit
-# 8. Capture the labs, medications and EOSS at the index and last visits in 
+# 8. Capture the labs, medications and EOSS at the index and last visits in
 #     each phase
 # 9. Capture comorbidities at the index and last visits in each phase
 # 10. Create Weight_kgs variable
