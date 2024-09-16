@@ -17,12 +17,6 @@
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-# *** If control and index are processed separately, then the index visits data
-# will have extra columns than the non-index visits.
-# What would happen if we try to bind rows when there are columns that are added?
-
-
-
 labs_procedures <- function(temp, int) {
   tic()
 
