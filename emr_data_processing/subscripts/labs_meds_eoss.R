@@ -4,10 +4,10 @@
 # Get labs, meds, and create EOSS
 #
 # Description:
-# The purpose of this script is break apart the visits_post_id data frame and 
+# The purpose of this script is break apart the visits_post_id data frame and
 # then process the visits data to utilize index date at control and intervention
 # and last visit (excluding index visits) at control and intervention separately
-# to capture labs, meds and create the EOSS. Needs four different data frames 
+# to capture labs, meds and create the EOSS. Needs four different data frames
 # with non-overlapping visits to work properly.
 #
 # Dependencies:
@@ -106,7 +106,7 @@ df_list <- lapply(df_list, proc_data)
 # into working correctly. This chunk of code reverts the IndexVisit and
 # IndexDate columns back to their original state. Only needed for lv_con and
 # lv_int subsets.
-clean_data <- function(temp){
+clean_data <- function(temp) {
   if (sum(grepl("IndexDate_backup", names(temp))) == 1) {
     temp %<>%
       mutate(IndexDate = IndexDate_backup,
