@@ -33,7 +33,7 @@
 
 # Capture comorbidities function -----------------------------------------------
 capture_comorbidities <- function(temp, times, years) {
-  
+
   # Load comorbidities of interest as of 11-29-22 ------------------------------
   # Will load only if it is not already present in the global environment
   if (!exists("cois")) {
@@ -42,9 +42,10 @@ capture_comorbidities <- function(temp, times, years) {
 
   # Load the compass tables via the read_pw_csv() function
   purrr::walk(
-    .x  = c("dx", "dxco"),
-    .f = read_pw_csv)
-  
+    .x = c("dx", "dxco"),
+    .f = read_pw_csv
+  )
+
   # 1. Prep dx_sub -------------------------------------------------------------
   ## 1.1 Merge the dx and dxco data frames ----
   # Merging dx and dxco will result will not only result in duplicates, but
@@ -52,18 +53,16 @@ capture_comorbidities <- function(temp, times, years) {
   # some patients will have the same Encounter ID, Dx Code, etc, but only differ
   # in the Provenance and/or DiagnosisDate value
   dx_sub <- bind_rows(dx, dxco)
-  
-  # rm(dx, dxco)
-  
+
   dx_sub <- distinct(dx_sub)
-  
+
   ## 1.2 Pare down the data to only the patients in the input visits/temp df
-  dx_sub <- 
+  dx_sub <-
     dx_sub %>%
     filter(Arb_PersonId %in% temp$Arb_PersonId)
 
   ## 1.3 Filter by comorbidities of interest for data reduction
-  dx_sub <- 
+  dx_sub <-
     dx_sub %>%
     filter(DiagnosisCode %in% cois$`ICD-10.code(s)`)
 
@@ -73,7 +72,7 @@ capture_comorbidities <- function(temp, times, years) {
   # n.b. The dates for each encounter ID are not consistent. ie the dates
   # for the same encounter ID can be vastly different.
   # arrange(DiagnosisDate) is used to make the function's behavior more
-  # consistent/predictable.
+  # predictable.
 
   ## 2.1 slice the earliest diagnosis found ----
   dx_sub <-
@@ -102,7 +101,7 @@ capture_comorbidities <- function(temp, times, years) {
   ## 3.2 merge the encounter date into dx sub by encounter id to capture a ----
   # DiagnosisDate from the EncounterDate in the case that there is no
   # DiagnosisDate available in dx_sub
-  dx_sub <- 
+  dx_sub <-
     dx_sub %>%
       mutate(DiagnosisDate = lubridate::as_date(DiagnosisDate)) %>%
       left_join(.,
@@ -110,12 +109,11 @@ capture_comorbidities <- function(temp, times, years) {
                 by = "Arb_EncounterId") %>%
       mutate(DiagnosisDate = if_else(is.na(DiagnosisDate),
                                      EncounterDate,
-                                     DiagnosisDate)
-      ) %>%
+                                     DiagnosisDate)) %>%
       select(-EncounterDate)
 
   # Filter diagnoses to the look back period
-  dx_sub <- 
+  dx_sub <-
     dx_sub %>%
       mutate(lookback = date_min - DiagnosisDate) %>%
       filter(lookback < (years * 360),
@@ -124,7 +122,7 @@ capture_comorbidities <- function(temp, times, years) {
 
   ## 3.3 filter out dx_sub to keep records with comorbidities of interest ----
   invisible(gc())
-  dx_sub <- 
+  dx_sub <-
     dx_sub %>%
       mutate(ICD_Header = sub("\\..*", "", DiagnosisCode),
              code = sub("\\.", "", DiagnosisCode))
@@ -133,7 +131,7 @@ capture_comorbidities <- function(temp, times, years) {
   # dx_sub by ICD_Header. ICD_Header was chosen as the matching variable
   # because some comorbidities of interest are excluded when relying on the full
   # ICD-10 code variable such as F32.A.
-  dx_sub <- 
+  dx_sub <-
     dx_sub %<>%
       left_join(.,
                 distinct(select(cois, all_of(c("category",
@@ -209,14 +207,9 @@ capture_comorbidities <- function(temp, times, years) {
   # Get the column names of dx_sub_coi_count to specify which columns to change
   # NAs to 0
   coi_names <- names(select(dx_sub_coi_count, -Arb_PersonId))
-# 
-#   output <- list("dx_sub_coi_count" = dx_sub_coi_count,
-#                  "coi_names" = coi_names,
-#                  "times" = times,
-#                  "years" = years)
 
   temp <- left_join(temp, dx_sub_coi_count, by = "Arb_PersonId")
-  
+
   invisible(gc())
 
   return(temp)
