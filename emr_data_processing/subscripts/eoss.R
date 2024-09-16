@@ -73,7 +73,7 @@ eoss <- function(temp) {
 
   # Dyslipidemia - picks up nothing, but is listed in the comorbidities_of_
   # interest.
-  # NAFLD - use  "Fatty (Change of) liver, not elsewhere classified", but is 
+  # NAFLD - use  "Fatty (Change of) liver, not elsewhere classified", but is
   # listed in the comorbidities_of_interest.
   stage_1_terms <- c(
     "Gestational diabetes",
