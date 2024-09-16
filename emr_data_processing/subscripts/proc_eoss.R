@@ -114,10 +114,10 @@ proc_eoss <- function(data){
   # now just fix the eoss part without loading data frames
   # W eoss time is 546.59 second
   # eoss takes the longest, setting max size to 12gb
-  plan(multisession, workers = 4)
-  options(future.rng.onMisuse = "ignore",
-          future.globals.maxSize = (1200*1024^2)
-          )
+  # plan(multisession, workers = 4)
+  # options(future.rng.onMisuse = "ignore",
+  #         future.globals.maxSize = (8 * 1024^3)
+  #         )
   
   # df_list <-
   # c(1,2,3,4) %>%
@@ -140,10 +140,11 @@ proc_eoss <- function(data){
     return(temp)
   }
   
+  tic()
   df_list <-
     c(1,2,3,4) %>%
     future_map(~ df_list[[.x]] %>% proc_data(.))
-
+  toc()
   
 # Other option is to assign a group to each
 # ind_con, ind_int, lv_con, lv_int data frame
