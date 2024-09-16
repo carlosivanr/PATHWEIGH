@@ -116,7 +116,7 @@ proc_labs_meds_eoss <- function(data){
   # eoss takes the longest, setting max size to 12gb
   plan(multisession, workers = 4)
   options(future.rng.onMisuse = "ignore",
-          future.globals.maxSize = (1200*1024^2)
+          future.globals.maxSize = (8 * 1024^3)
           )
   
   df_list <-
