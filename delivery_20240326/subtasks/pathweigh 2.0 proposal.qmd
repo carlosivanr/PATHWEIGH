@@ -1,0 +1,174 @@
+---
+title: "PATHWEIGH 2.0 Proposal"
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+
+execute: 
+  echo: false
+---
+
+```{r}
+#| echo: false
+# library(tidyverse)
+# library(gtsummary)
+# library(here)
+pacman::p_load(tidyverse,
+               gtsummary,
+               here,
+               install = FALSE)
+  
+
+# Load visits_post_id
+#load("S:/FM/PATHWEIGH/Quantitative/Projects/dataset_20240326/data/processed_visits_post_id_20240326.RData")
+load(here("delivery_20240326/data/processed_visits_post_id_20240326.RData"))
+```
+
+```{r}
+# Filter to only eligible and enrolled encounters in the intervention phase
+# 260,440 unique observations in intervention
+visits_post_id <- 
+visits_post_id %>%
+  filter(EE == 1,
+         Intervention.factor == "Intervention")
+```
+
+```{r}
+# Filter encounter to the period between 03-17-2023 and 03-16-2024
+visits_post_id <- 
+visits_post_id %>%
+  filter(EncounterDate >= "2023-03-17", EncounterDate <= "2024-03-16")
+```
+
+### The total number of PATHWEIGH visits in the intervention phase from 2023-03-17 to 2024-03-16
+- Denominator includes all visits from eligible and enrolled patients from the same time frame
+```{r}
+#| eval: false
+visits_post_id %>% 
+  nrow()
+```
+
+```{r}
+visits_post_id %>%
+  select(PW_Visit) %>%
+  tbl_summary()
+```
+
+### The total number of unique PATHWEIGH patients in the intervention phase 2023-03-17 to 2024-03-16
+- Denominator includes all eligible and enrolled patients from the same time frame
+```{r}
+#| eval: false
+# unique patients in the period
+visits_post_id %>%
+  select(Arb_PersonId) %>%
+  distinct() %>%
+  nrow()
+```
+
+```{r}
+pw_ids <- visits_post_id %>%
+  filter(PW_Visit == 1) %>%
+  select(Arb_PersonId) %>%
+  distinct()
+
+visits_post_id <-
+  visits_post_id %>%
+  mutate(PW_Pnt = ifelse(Arb_PersonId %in% pw_ids$Arb_PersonId, 1, 0))
+```
+
+```{r}
+visits_post_id %>%
+  group_by(Arb_PersonId) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(PW_Pnt) %>%
+  tbl_summary()
+```
+
+### The number of unique providers associated with at least one PATHWEIGH visit.
+```{r}
+# Get the unique providers NPI that delivered any pathweigh visit
+pw_providers = visits_post_id %>%
+  filter(PW_Visit == 1) %>%
+  select(ProviderNpi) %>%
+  distinct()
+```
+
+```{r}
+# Create an indicator column of pcps that delivered pathweigh visits
+visits_post_id <- 
+  visits_post_id %>%
+  mutate(PW_PCP = ifelse(ProviderNpi %in% pw_providers$ProviderNpi, 1, 0))
+```
+
+```{r}
+# proportion of providers that delivered pw visits
+visits_post_id %>%
+  filter(Intervention.factor == "Intervention") %>%
+  group_by(ProviderNpi) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(PW_PCP) %>%
+  tbl_summary()
+```
+
+```{r}
+# create a month and year column
+visits_post_id <- 
+visits_post_id %>%
+  mutate(year = lubridate::year(EncounterDate),
+         month = lubridate::month(EncounterDate),
+         yr_month = substr(EncounterDate, 0, 7))
+```
+
+### The number and percent of PW providers in each month from 2023-03-17 through 2024-03-16
+```{r}
+visits_post_id %>%
+  group_by(yr_month, ProviderNpi) %>%
+  arrange(desc(PW_PCP)) %>%
+  slice_head() %>%
+  group_by(yr_month) %>%
+  summarise(n_pw_pcp = sum(PW_PCP)) %>%
+  mutate(tot_pw_pcp = n_distinct(pw_providers$ProviderNpi),
+         percent = str_c(round(100 * (n_pw_pcp/tot_pw_pcp), 2), "%")) %>%
+  gt::gt()
+```
+
+```{r}
+#| eval: false
+#| echo: false
+# How many cohorts are associated with each PW pcp
+# PCPs have visits any where between 1 and 3 cohort
+visits_post_id %>%
+  filter(PW_PCP == 1) %>%
+  group_by(ProviderNpi) %>%
+  summarise(n_uniq_cohorts = n_distinct(Cohort)) %>%
+  arrange(desc(n_uniq_cohorts)) %>%
+  select(n_uniq_cohorts) %>%
+  tbl_summary()
+
+# what's the min date
+# 2020-03-17
+min(visits_post_id$EncounterDate)
+max(visits_post_id$EncounterDate)  
+
+# Assign each visits to a 6-month block
+visits_post_id <- 
+visits_post_id %>%
+  mutate(block_6m = ifelse(EncounterDate <= "2020-09-16", "6m_01", NA)) %>%
+  mutate(block_6m = ifelse(EncounterDate >= "2020-09-17" & EncounterDate <= "2021-03-16", "6m_02", block_6m),
+         block_6m = ifelse(EncounterDate >= "2021-03-17" & EncounterDate <= "2021-09-16", "6m_03", block_6m),
+         block_6m = ifelse(EncounterDate >= "2021-09-17" & EncounterDate <= "2022-03-16", "6m_04", block_6m),
+         block_6m = ifelse(EncounterDate >= "2022-03-17" & EncounterDate <= "2022-09-16", "6m_05", block_6m),
+         block_6m = ifelse(EncounterDate >= "2022-09-17" & EncounterDate <= "2023-03-16", "6m_06", block_6m),
+         block_6m = ifelse(EncounterDate >= "2023-03-17" & EncounterDate <= "2023-09-16", "6m_07", block_6m),
+         block_6m = ifelse(EncounterDate >= "2023-09-17" & EncounterDate <= "2024-03-16", "6m_08", block_6m),
+         block_6m = ifelse(EncounterDate >= "2024-03-17", "6m_09", block_6m),
+  ) 
+
+visits_post_id %>%
+  filter(PW_PCP == 1) %>%
+  select(block_6m) %>%
+  tbl_summary()
+```
+
