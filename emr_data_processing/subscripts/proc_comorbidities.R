@@ -17,114 +17,161 @@
 
 
 proc_comorbidities <- function(data){
-  # Load the capture_comorbidities function --------------------------------------
+  # Load the capture_comorbidities function ------------------------------------
   source(str_c(emr_dir, "subscripts/capture_comorbidities.R"))
-  
-  # Create separate subsets of data to capture comorbidities ---------------------
+
+  # Create separate subsets of data to capture comorbidities -------------------
   ## 1. index visits in control phase ----
-  ind_con <- 
-    data %>%
-    filter(IndexVisit == 1,
-           Intervention == 0,
-           Censored == 0) 
+  # Can be processed normally without modifying the index date
+  # For some individuals, the index visit and the last visit are the same visit
+  ind_con <- bind_rows(
+    (data %>%
+       filter(Censored == 0,
+              IndexVisit == 1,
+              Intervention == 0,
+              LastVisit == 1)),
+    (data %>%
+       filter(Censored == 0,
+              IndexVisit == 1,
+              Intervention == 0,
+              LastVisit == 0))
+  )
   
   ## 2. last visits in control phase ----
-  lv_con <- 
-    data %>%
-    filter(IndexVisit == 0,
-           LastVisit == 1,
-           Intervention == 0) # *** Does it matter if this subset is censored or not?
+  # Needs a temporary modification of the index date to trick the algorithm into
+  # using the encounter date instead of the index date
+  lv_con <- data %>%
+    filter(Censored == 0,
+           IndexVisit == 0,
+           Intervention == 0,
+           LastVisit == 1) %>%
+    mutate(IndexDate_backup = IndexDate,
+           IndexDate = EncounterDate,
+           IndexVisit = 1)
   
   ## 3. index visits in intervention phase ----
-  ind_int <- 
-    data %>%
-    filter(Censored == 0,
-           IndexVisit == 1,
-           Intervention == 1)
+  # Can be processed normally without modifying the index date
+  ind_int <- bind_rows(
+    (data %>%
+       filter(Censored == 0,
+              IndexVisit == 1,
+              Intervention == 1,
+              LastVisit == 1)),
+    (data %>%
+       filter(Censored == 0,
+              IndexVisit == 1,
+              Intervention == 1,
+              LastVisit == 0))
+  )
   
   ## 4. last visits in intervention phase ----
-  lv_int <- 
-    data %>%
-    filter(IndexVisit == 0,
-           LastVisit == 1,
-           Intervention == 1)
+  # Needs a temporary modification of the index date to trick the algorithm into
+  # using the encounter date instead of the index date
+  lv_int <- data %>%
+    filter(Censored == 0,
+           IndexVisit == 0,
+           Intervention == 1,
+           LastVisit == 1) %>%
+    mutate(IndexDate_backup = IndexDate,
+           IndexDate = EncounterDate,
+           IndexVisit = 1)
   
-  # Put dfs into a list and then process -----------------------------------------
+  # Put dfs into a list and then process ---------------------------------------
   df_list <- list(ind_con, lv_con, ind_int, lv_int)
   
-  # Pare down each data set in df_list to contain only the necessary columns
-  # for capturing comorbidities
-  df_list <- 
-    lapply(df_list, 
-           function(x) 
-             x %<>% 
-             select(Arb_PersonId, IndexDate, Cohort, Arb_EncounterId, EncounterDate, Intervention))
+  # Remove variables from workspace.
+  rm(ind_con, ind_int, lv_con, lv_int)
+  
+  invisible(gc())
   
   # Apply the capture_comorbidities function to each data set in df_list
   # Set to find comorbidities that are observed at least 2 times within the last 
   # 2 years
-  df_list <- lapply(df_list, capture_comorbidities, 2, 2)
+  # df_list <- lapply(df_list, capture_comorbidities, 2, 2)
+  # Apply the proc data function
+  tic()
+  df_list <-
+    c(1, 2, 3, 4) %>%
+    future_map(~ df_list[[.x]] %>% capture_comorbidities(., 2, 2))
+  toc()
+  beepr::beep(sound = 2)
   
-  # 1 - OK, 2 - OK , 3 - OK,  4- OK
-  # capture_comorbidities(df_list[[3]], 2, 2) # to troubleshoot 1 df at a time
+  # %%%%%%%%%%%%%%%%% REGION FROM PROC COMORBIDITIES %%%%%%%%%%%%%%%%%%%%%%%%%%%
+  # Clean up data before stitching ---------------------------------------------
+  # Since the labs_procedures(), capture_medications(), and eoss() functions
+  # require an index date, data subsets that do not have an index visit are set
+  # to 1 and the index date is set to the encounter date to "trick" the function
+  # into working correctly. This chunk of code reverts the IndexVisit and
+  # IndexDate columns back to their original state. Only needed for lv_con and
+  # lv_int subsets.
+  clean_data <- function(temp) {
+    # If the data frame contains an IndexDate_backup column, then modify
+    if (sum(grepl("IndexDate_backup", names(temp))) == 1) {
+      temp %<>%
+        mutate(IndexDate = IndexDate_backup,
+               IndexVisit = 0) %>%
+        select(-IndexDate_backup)
+    }
+    return(temp)
+  }
   
-  # Merge the comorbidities of interest and their counts into each subset df ----
-  #  1. Index visits in control period 
-  ind_con %<>%
-    left_join(., 
-              df_list[[1]][["dx_sub_coi_count"]],
-              by = "Arb_PersonId")
+  # Apply the clean_data function to the list of data frames
+  df_list <- map(df_list, clean_data)
   
-  # 2. Last visits in control period, must not include index visits
-  lv_con %<>%
-    left_join(., 
-              df_list[[2]][["dx_sub_coi_count"]],
-              by = "Arb_PersonId")
+  # Recreate visits_post_id ----------------------------------------------------
+  # This vector represents the index visits and last visit encounter ids used
+  # to capture the variables. Used to create a data frame that does not contain
+  # those encounter ids
+  linked_visit_ids <-
+    bind_rows(df_list) %>%
+    pull(Arb_EncounterId)
   
-  # 3. Index visits in intervention
-  ind_int %<>%
-    left_join(., 
-              df_list[[3]][["dx_sub_coi_count"]],
-              by = "Arb_PersonId")
+  # Filter out visits that were processed from visits_post_id
+  non_linked_visits <-
+    data %>%
+    filter(!Arb_EncounterId %in% linked_visit_ids)
   
-  # 4. Last visits in control period, must not include index visits
-  lv_int %<>%
-    left_join(., 
-              df_list[[4]][["dx_sub_coi_count"]],
-              by = "Arb_PersonId")
+  # Bind the subsets of index and last visits that were processed
+  linked_visits <- bind_rows(df_list)
   
-  # Bind rows --------------------------------------------------------------------
-  # Stack the index and last visits with the comorbidities, which will replace
-  # the encounters in the visits_post_id data frame
-  comorbidities <- 
-    bind_rows(ind_con, lv_con, ind_int, lv_int)
+  # Check to ensure that no new rows were added before replacing visits_post_id
+  # If no new rows, then bind the subsets together and save as a new 
+  # data frame
+  if (bind_rows(linked_visits, non_linked_visits) %>% nrow() == dim(data)[1]) {
+    temp_data <- bind_rows(linked_visits, non_linked_visits)
+  } else {
+    stop("The number of modified output visits does not equal the number of input visits!!! Review and revise code.")
+  }
   
-  # Stack all of the visits back with visits_post_id, after removing the encounters
-  # from which the comorbidities were linked to i.e. index, last vist, in each
-  # phase
-  data %<>%
-    filter(!Arb_EncounterId %in% comorbidities$Arb_EncounterId) %>%
-    bind_rows(., comorbidities)
+  # temp_data %<>%
+  #   group_by(Arb_PersonId, Intervention.factor) %>%
+  #   arrange(desc(Intervention)) %>%
+  #   fill(names(. %>% select(O2CPAPBIPAP:Ref_WellnessClinic)),
+  #        .direction = "down") %>%
+  #   ungroup() #%>%
+  #   # select(-Cohort_end_date)
   
+  rm(df_list)
+  
+  # %%%%%%%%%%%%%%%%%%%%%%%%% END REGION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  
   # Fix the NAs ------------------------------------------------------------------
-  # Applied here to also address NAs in non-index and non last visit encounters for
-  # comorbidities
-  data %<>%
-    mutate(across(Dyslipidemia:`Binge eating`, ~ ifelse(is.na(.), 0, .)))
+  # Get the name of the first comorbidity
+  start <- names(temp_data[,dim(data)[2]+1])
+  stop <- names(temp_data[,dim(temp_data)[2]])
   
-  # Arrange column names by percentage -------------------------------------------
+  temp_data %<>% 
+    mutate(across(sym(start):sym(stop), ~ ifelse(is.na(.), 0,.)))
+  
+  # Arrange column names by percentage -----------------------------------------
   comorbidity_names <- names(
-    data %>% 
-      select(Dyslipidemia:`Binge eating`))
-    
-  # Assign comorbidity names, back to the global environment
-  comorbidity_names <<- comorbidity_names 
+    temp_data %>% 
+      select(sym(start):sym(stop)))
   
   # Create an index of the order of comorbidity column names arranged by the 
   # sum of the column's values. This index is used to order the columns by 
   # frequency for displaying in a table
   index <- 
-    data %>% 
+    temp_data %>% 
     select(all_of(comorbidity_names)) %>%
     colSums() %>%
     order(decreasing = TRUE)
@@ -132,28 +179,19 @@ proc_comorbidities <- function(data){
   # Reorder comorbidity names
   comorbidity_names <- comorbidity_names[index]
   
+  # Assign comorbidity names, back to the global environment
+  comorbidity_names <<- comorbidity_names 
+  
   # Rearrange the columns so that the cormorbidities are ordered from most 
   # frequently observed comorbidities that are observed at least 2x within the 2
   # years from the index/last visit to the least frequently observed comorbidities.
-  data %<>%
+  temp_data %<>%
     select(Arb_PersonId:EOSS,
            all_of(comorbidity_names))
   
-  # Remove intermediary data frames and memory resources -------------------------
-  rm(ind_int,
-     ind_con,
-     lv_con,
-     lv_int,
-     df_list,
-     comorbidities)
-  
+  # Remove intermediary data frames and memory resources -----------------------
   invisible(gc())
   
-  return(data)
+  return(temp_data)
   
 }
-# # Generate plots of the comorbidities, for eligible and enrolled patients, i.e.
-# # visits after index date since index date is required
-# # Requires a dataset with comorbidities count
-# #comorbidities_plot <- hist_como(visits, "Eligible and enrolled")
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
