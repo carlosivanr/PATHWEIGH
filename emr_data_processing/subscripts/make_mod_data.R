@@ -18,8 +18,8 @@
 make_mod_data <- function(data, delivery){
   
   # Initial data filtering -----------------------------------------------------
-  # Remove any patient where sex is unknown because the model could fail due to
-  # sparseness, and filters out anyone who was censored
+  # Remove any visits where sex is unknown because the model could fail due to
+  # sparseness, and filters out any visits that were censored
   data %<>% 
     filter(Sex != "Unknown") %>%
     filter(Censored == 0)
@@ -28,11 +28,10 @@ make_mod_data <- function(data, delivery){
   # In order to capture change in weight, each patient must have at least 2
   # visits in each of the control and intervention phases
   # Uses two separate vectors of patient ids so that ee_ene can be filtered 
-  # in each separate phase, otherwise using just a patient id can pull in visits
-  # from any phase where 2 or more visits in a phase
+  # in each separate phase
   
   # capture the patient ids for those that have more than 1 visit in the control
-  # phase to use in the modelling
+  # phase to use in modelling
   con_ids_gt1_visits <-
     data %>%
     filter(Intervention == 0) %>%
@@ -41,9 +40,8 @@ make_mod_data <- function(data, delivery){
     filter(n > 1) %>%
     pull(Arb_PersonId)
   
-  
   # capture the patient ids for those that have more than 1 visit in the intervention
-  # phase to use in the modelling
+  # phase to use in modelling
   int_ids_gt1_visits <-
     data %>%
     filter(Intervention == 1) %>%
@@ -152,6 +150,9 @@ make_mod_data <- function(data, delivery){
   
   
   # Prep the data frames -------------------------------------------------------
+  # Removes the index visits and sets the index weight as a baseline weight 
+  # value
+  
   # Create the control data
   mod_data_con <- 
     data %>%
@@ -160,7 +161,6 @@ make_mod_data <- function(data, delivery){
            Arb_PersonId %in% con_ids_gt1_visits) %>%
     prep_data()
   
-
   # Create the intervention data
   mod_data_int <- 
     data %>%
@@ -169,9 +169,10 @@ make_mod_data <- function(data, delivery){
            Arb_PersonId %in% int_ids_gt1_visits) %>%
     prep_data()
   
-  
   # Stack the two data frames together
   mod_data <- bind_rows(mod_data_con, mod_data_int)
+  
+  rm(mod_data_int, mod_data_con)
   
   
   # Set reference for year at index
