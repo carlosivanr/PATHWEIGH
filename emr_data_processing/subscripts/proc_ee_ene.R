@@ -73,17 +73,17 @@ if (file.exists(data_file)) {
   # PROC LABS MEDS PROCEDURES --------------------------------------------------
   source(str_c(emr_dir, "subscripts/proc_labs_meds.R"))
   invisible(gc())
-  data <- proc_labs_meds(data)
+  ee_ene <- proc_labs_meds(ee_ene)
 
   # PROC EOSS ------------------------------------------------------------------
   source(str_c(emr_dir, "subscripts/proc_eoss.R"))
   invisible(gc())
-  data <- proc_eoss(data)
+  ee_ene <- proc_eoss(ee_ene)
 
   # PROC COMORBIDITIES ---------------------------------------------------------
   source(str_c(emr_dir, "subscripts/proc_comorbidities.R"))
   invisible(gc())
-  data <- proc_comorbidities(data)
+  ee_ene <- proc_comorbidities(ee_ene)
 
   # Save processed ee_ene added columns only for future use to merge in
   # labs, meds, procedures, eoss, and comorbidities
@@ -98,5 +98,7 @@ if (file.exists(data_file)) {
        file = here(str_c("delivery_", data_delivery_date),
                    "data",
                    str_c("processed_ee_ene_", RData)))
+  
+  rm(processed_ee_ene)
 
 }
