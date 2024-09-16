@@ -5,15 +5,15 @@
 # form the EOSS variables to prevent not capturing the sub diagnoses that could
 # arise from using ICD-10 codes.
 
-# The compass comorbidities tables represent a fraction of all available 
-# comorbidities. The only comorbidities delivered are those listed in the 
-# comorbidities_of_interest.csv file located in the working_files/comorbidities 
+# The compass comorbidities tables represent a fraction of all available
+# comorbidities. The only comorbidities delivered are those listed in the
+# comorbidities_of_interest.csv file located in the working_files/comorbidities
 # directory of the project. Search terms are used rather than ICD-10 codes bc
 # the comorbidities of interest may not be a comprehensive list of all codes
 # linked to a particular comorbidity. For example, there may be a different code
 # for a condition of the left knee that is similar but not exactly the same as
 # the condition for the right knee. In addition, search terms convey more
-# human interpretable meaning i.e. Diabetes vs E68.xx 
+# human interpretable meaning i.e. Diabetes vs E68.xx
 
 # This script also only utilizes the labs/procedures and medications already
 # available in the data. ie meds captured from within 30 days of the index
@@ -21,67 +21,68 @@
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-eoss <- function(temp){
+eoss <- function(temp) {
   # Set the number of days prior to and after the index/reference visit
   # n.b. days after reference will be negative when subtracting reference
   # from OrderedDate
   n_days_prior <- 30
   n_days_after <- -30
-  
+
   # Create a temporary data frame from the input data --------------------------
   #temp <- visits_post_id # for development purposes only
-  
+
   # Filter data to only those who have an index visit
   temp %<>% 
     filter(Censored == 0, 
            IndexVisit == 1)
-  
+
   # Save the number of rows of temp to ensure merges are conducted correctly
   n_obs_start <- dim(temp)[1]
-  
+
   # Create distinct_pts_x_ind ----
   # distinct_pts_x_ind borrowed from labs & procedures script. Originally 
   # intended to capture labs at different index visits. New purpose is to 
   # capture the unique patient ids and index dates to filter meds table and
   # merge with meds data
-  distinct_pts_x_ind <- 
-    temp %>% 
+  distinct_pts_x_ind <-
+    temp %>%
     filter(Censored == 0,
            IndexVisit == 1) %>%
     select(Arb_PersonId, IndexDate) %>%
     distinct() %>%
     filter(!is.na(IndexDate))
-  
+
   # Check patient Ids with more than one unique distinct index date for trouble
   # shooting
   if ((distinct_pts_x_ind %>%
        group_by(Arb_PersonId) %>%
        count() %>%
        filter(n > 1) %>%
-       nrow()) != 0){
+       nrow()) != 0) {
     stop("Distinct patients at index are not unique!!")
   }
-  
-  
+
   # Import updated dx tables ---------------------------------------------------
   # n.b. The dx and dx_como tables had errors in the ICD-10 codes that required
   # updated deliveries from compass. Current code was set to work with updated
   # tables for the 2023-03-22 delivery, but will need to be modified to work
   # with any delivery beyond 2023-03-22. No backwards compatibility for previous
   # data sets, unless those tables get updated as well.
-  # Originally, Gestational Diabetes not found, had to revise & resubmit PR & 
+  # Originally, Gestational Diabetes not found, had to revise & resubmit PR &
   # Definitions, O24 instead of Q24. Then prediabetes was added.
 
-  # Dyslipidemia - picks up nothing, but is listed in the comorbidities_of_interest.
-  # NAFLD - use  "Fatty (Change of) liver, not elsewhere classified", but is listed in the comorbidities_of_interest.
+  # Dyslipidemia - picks up nothing, but is listed in the comorbidities_of_
+  # interest.
+  # NAFLD - use  "Fatty (Change of) liver, not elsewhere classified", but is 
+  # listed in the comorbidities_of_interest.
   stage_1_terms <- c(
     "Gestational diabetes",
     "Polycystic ovarian syndrome",
     "Proteinuria",
     "Cellulitis")
-  
+
   stage_2_terms <- c(
-    "Type 2 Diabetes", 
+    "Type 2 Diabetes",
     "Hypertension",
     "Anxiety",
     "Obstructive sleep apnea",
@@ -90,7 +91,7 @@ eoss <- function(temp){
     "Depression",
     "Osteoarthritis",
     "Fatty (change of)")
-  
+
   stage_3_terms <- c(
     "Chronic kidney disease",
     "cirrhosis",
@@ -110,23 +111,23 @@ eoss <- function(temp){
     "old myocardial infarction",
     "other forms of chronic ischemic heart disease",
     "silent myocardial ischemia")
-  
-  # Collect all of the search terms into a single vector  
+
+  # Collect all of the search terms into a single vector
   search_terms <- c(
     stage_1_terms,
     stage_2_terms,
     stage_3_terms)
-  
+
   # Filter the dxco data frame to those within the input data set and to records
   # where the diagnosis matches one of the search terms
   dx_sub <- bind_rows(dx, dxco) %>%
     filter(Arb_PersonId %in% temp$Arb_PersonId) %>%
-    filter(grepl(str_c(search_terms, collapse = "|"), 
+    filter(grepl(str_c(search_terms, collapse = "|"),
                  ignore.case = TRUE, 
                  DiagnosisDescription)) %>%
     mutate(DiagnosisDate = lubridate::as_date(DiagnosisDate))
-  
-  # Merge in index dates to impose a window of when the medication was ordered  
+
+  # Merge in index dates to impose a window of when the medication was ordered
   # distinct_pts_
   dx_data <-
     left_join(distinct_pts_x_ind,
@@ -137,35 +138,33 @@ eoss <- function(temp){
     group_by(Arb_PersonId, DiagnosisDescription) %>%
     slice_head() %>%
     ungroup()
-  
+
   # Patient Ids meeting dx criteria for Stage 1 ----
-  stage_1_dx <- 
+  stage_1_dx <-
     dx_data %>%
     filter(grepl(str_c(stage_1_terms, collapse = "|"), ignore.case = TRUE, DiagnosisDescription)) %>%
     pull(Arb_PersonId)
-  
+
   # Patient Ids meeting dx criteria for Stage 2 ----
-  stage_2_dx <- 
+  stage_2_dx <-
     dx_data %>%
     filter(grepl(str_c(stage_2_terms, collapse = "|"), ignore.case = TRUE, DiagnosisDescription)) %>%
     pull(Arb_PersonId)
-  
+
   # Patient Ids meeting dx criteria for Stage 3 ----
-  stage_3_dx <- 
+  stage_3_dx <-
     dx_data %>%
     filter(grepl(str_c(stage_3_terms, collapse = "|"), ignore.case = TRUE, DiagnosisDescription)) %>%
     pull(Arb_PersonId)
-  
-  
-  
+
+
   # Medications ----------------------------------------------------------------
   beta_blockers <- c("propranolol", "metoprolol")
-  
-  
-  diabetes_meds <- c("insulin", 
-                     "glargine", 
+
+  diabetes_meds <- c("insulin",
+                     "glargine",
                      "detemir",
-                     "degludec", 
+                     "degludec",
                      "glyburide",
                      "glibenclamide",
                      "glimepiride",
@@ -184,8 +183,7 @@ eoss <- function(temp){
                      "empagliflozin",
                      "dapagliflozin",
                      "ertugliflozin")
-  
-  
+
   psych_meds <- c("Nortriptyline",
                   "Amitriptyline",
                   "Doxepin",
@@ -198,7 +196,7 @@ eoss <- function(temp){
                   "Clozapine",
                   "Quetiapine",
                   "Aripiprazole",
-                  "Valproic acid", 
+                  "Valproic acid",
                   "valproate",
                   "Lithium",
                   "Buproprion",
@@ -207,54 +205,54 @@ eoss <- function(temp){
                   "Ziprasidone",
                   "Lisdexamfetamine",
                   "Methylphenidate",
-                  "Amphetamine", 
+                  "Amphetamine",
                   "dextroamphetamine")
-  
+
   # Combine diabetes and psych meds into a single vector
   stage_2_meds <- c(beta_blockers,
-                    diabetes_meds, 
-                    psych_meds)  
-  
+                    diabetes_meds,
+                    psych_meds)
+
   # Create meds sub to capture the medications of interest for the patients
   # of interest
-  meds_sub <-   
+  meds_sub <-
     meds %>%
     filter(Arb_PersonId %in% distinct_pts_x_ind$Arb_PersonId,
            ActiveMed == "Y",
            grepl(str_c(c(beta_blockers,
                          diabetes_meds,
-                         psych_meds), 
-                       collapse = "|"), 
-                 ignore.case = TRUE, 
+                         psych_meds),
+                       collapse = "|"),
+                 ignore.case = TRUE,
                  GenericName))
-  
+
   # Check to see that all values are unique
-  if (n_distinct(meds_sub) != dim(meds_sub)[1]){
+  if (n_distinct(meds_sub) != dim(meds_sub)[1]) {
     stop("Duplicated rows in meds_sub, review and revise !!!")
   }
-  
-  # Merge in index dates to impose a window of when the medication was ordered   
+
+  # Merge in index dates to impose a window of when the medication was ordered
   meds_data <-
     left_join(distinct_pts_x_ind,
               select(meds_sub, Arb_PersonId, OrderedDate, GenericName, ActiveMed),
-              by=c("Arb_PersonId")) %>%
-    filter((IndexDate-OrderedDate) <= n_days_prior,
-           (IndexDate-OrderedDate) >= n_days_after) %>%
+              by = c("Arb_PersonId")) %>%
+    filter((IndexDate - OrderedDate) <= n_days_prior,
+           (IndexDate - OrderedDate) >= n_days_after) %>%
     group_by(Arb_PersonId, GenericName) %>%
     slice_head() %>%
     ungroup() %>%
     pull(Arb_PersonId)
-  
-  
+
+
   # Create EOSS Stage ----------------------------------------------------------
   # Create an empty column for EOSS -----
   temp %<>%
     mutate(EOSS = NA)
-  
+
   # Criteria for Stage 0 ----
   temp %<>%
     mutate(EOSS = ifelse(
-      Systolic_blood_pressure < 130 | 
+      Systolic_blood_pressure < 130 |
         Diastolic_blood_pressure < 180 |
         A1C < 5.7 |
         ALT < 36 & AST < 33 |
@@ -263,7 +261,7 @@ eoss <- function(temp){
         eGFR > 90 |
         PHQ9 < 5 |
         GAD7 < 5, 0, EOSS))
-  
+
   # Criteria for Stage 1 ----
   temp %<>%
     mutate(EOSS = ifelse(
@@ -278,12 +276,11 @@ eoss <- function(temp){
         PHQ9 >= 5 & PHQ9 <=9 |
         GAD7 >= 5 & GAD7 <=9 |
         Arb_PersonId %in% stage_1_dx, 1, EOSS))
-  
-  
+
   # Criteria for Stage 2 ----
   temp %<>%
     mutate(EOSS = ifelse(
-      Systolic_blood_pressure >= 140 | 
+      Systolic_blood_pressure >= 140 |
         Diastolic_blood_pressure >= 90 |
         # FASTING GLUCOSE VARIABLE NOT AVAILABLE
         A1C >= 6.5 |
@@ -295,14 +292,10 @@ eoss <- function(temp){
         O2CPAPBIPAP == 1 |
         Arb_PersonId %in% stage_2_dx |
         Arb_PersonId %in% meds_data, 2, EOSS))
-  
-  
+
   # Criteria for Stage 3 ----
   temp %<>%
     mutate(EOSS = ifelse(Arb_PersonId %in% stage_3_dx, 3, EOSS))
-  
-  # toc()
+
   return(temp)
 }
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
