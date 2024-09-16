@@ -89,8 +89,6 @@ library(gtsummary)
 library(openxlsx)
 library(furrr)
 
-
-
 # Specify parameters -----------------------------------------------------------
 RData <- "20240326.RData" # Used as an out to write files
 data_delivery_date <- 20240326
@@ -112,8 +110,7 @@ emr_dir <- str_c(proj_parent_dir, "/emr_data_processing/")
 # onward in the emr_data_processing directory
 source(str_c(emr_dir, "subscripts/source_subscripts.R"))
 
-
-# Prepare Encounter Table ------------------------------------------------------
+# Encounter Table --------------------------------------------------------------
 # Encounter table contains information from the encounter including weight vals
 # Clean encounter table by changing -999 values in weight, creates smoking
 # variable and removes asterisks from values, among other tasks. See function
@@ -138,7 +135,6 @@ invisible(gc())
 # flow diagram of total number of encounters. Should be used to also determine
 # the total number of unique patients before narrowing down to eligible patients
 source(str_c(emr_dir, "subscripts/prep_visits.R"))
-
 
 # Define WPV Variables ---------------------------------------------------------
 # Controls identified by A-D in the analysis plan, Intervention identified via
@@ -208,7 +204,6 @@ invisible(gc())
 # Sets Cohort and whether or not the patient was enrolled
 visits <- set_index_date(visits)
 
-
 # Last visit in control phase --------------------------------------------------
 # Set the last visit in control's weight, from the first visit in the
 # intervention if and only if the first intervention has a weight, otherwise
@@ -251,27 +246,30 @@ ee_ene <- bind_rows(ee, ene)
 rm(ee, ene)
 invisible(gc())
 
+
+
 ## First prep the ee_ene data ----
 # Should yield 59 columns
 source(str_c(emr_dir, "subscripts/prep_ee_ene.R"))
 ee_ene <- prep_ee_ene(ee_ene)
-# beepr::beep(sound = 2)
+beepr::beep(sound = 2)
 
 ## Then get the labs, procedures, and comorbidities ----
 # Both arguments should be set to TRUE. Prior functionality of setting to FALSE
 # was built in to expedite the creation of the modeling data set. However,
 # project requirement changes to include meds, labs, procedures, etc. in the
 # modeling data rendered this feature obsolete.
-# tic()
+tic()
 source(str_c(emr_dir, "subscripts/proc_ee_ene.R"))
-# toc()
-# beepr::beep(sound = 2)
+toc()
+beepr::beep(sound = 2)
 invisible(gc())
 
 ## Temporary code chunk to modify AST & ALT values, will need to be introduced
 # into the proc_labs function during the next data delivery
 ee_ene %<>%
-  mutate(across(AST:ALT, ~ifelse(. > 100, NA, .)))
+  mutate(across(AST:ALT, ~ifelse(. > 100, NA, .))) %>%
+  mutate(BMI = ifelse(Arb_EncounterId == 170254415001, NA, BMI))
 
 ## Create the EE variable
 ee_ene %<>%
@@ -313,7 +311,6 @@ create_enrollment_table(visits_post_id)
 # subset of ee patients only to ./data of the current project directory.
 mod_data <- ee_ene %>% make_mod_data(., data_delivery_date)
 
-
 # Make pp_data -----------------------------------------------------------------
 # Create a data frame for the per_protocol analysis
 # Requires visits_post_id for the index visits of mod_data patients and mod_data
@@ -325,7 +322,7 @@ invisible(gc())
 # Save datasets ----------------------------------------------------------------
 # can also use a substring on RData to just get the date.
 save(visits,
-  file = here(proj_root_dir, "data", str_c("processed_all_visits_", RData))
+     file = here(proj_root_dir, "data", str_c("processed_all_visits_", RData))
 )
 
 save(
@@ -338,102 +335,4 @@ save(
   file = here(proj_root_dir, "data", str_c("ee_ene_", RData))
 )
 
-# saveRDS(
-#   comorbidity_names,
-#   file = here(
-#     proj_root_dir, "data",
-#     str_c("comorbidity_names_", data_delivery_date, ".RDS")
-#   )
-# )
-
 # END OF SCRIPT ----------------------------------------------------------------
-
-# Check visits vs visits_post_id -----------------------------------------------
-# Includes all visits for EE patients after the index visit, regardless of
-# whether or not those visits were WPV or if they have a recorded weight.
-# n.b. Enrolled is a visit level indicator
-# For 20221017 equals 186,676
-# For 20230322 equals 246,067
-# For 20231010 equals 323,015
-# For 20240326 equals 405,190
-visits %>%
-  filter(Enrolled == 1) %>%
-  nrow()
-
-# Visits that meet WPV criteria
-# For 20221017 equals 77,968
-# For 20230322 equals 99,484
-# For 20231010 equals 130,413
-# Ended up with 130,467 after mods to set_index for ENE
-# For 20240326  159,156
-visits %>%
-  filter(WPV > 0, Eligible == 1, EncounterDate >= IndexDate) %>%
-  nrow()
-
-# Check to see that each patient has a WPV -------------------------------------
-# For 2022-10-17 - 46,057 unique patient ids
-# For 2023-03-22 - 54,625 unique patient ids
-# For 2023-10-10 - 66,067 unique patient ids
-# For 2024-03-26 - 75,952 unique patient ids
-n_distinct(visits_post_id$Arb_PersonId)
-
-# How many visits where encounter date == index_date, in intervention ----------
-# For 2022-10-17, 19,419 for intervention
-# For 2023-03-22, 27,301 for intervention
-# For 2023-10-10, 44,143 for intervention
-# For 2024-03-26, 57,053 for intervention
-visits_post_id %>%
-  filter(EncounterDate == IndexDate,
-         Intervention == 1) %>%
-  nrow()
-
-# For 2022-10-17, 32,479 for control
-# For 2023-03-23, 35,035 for control
-# For 2023-10-10, 35,076 for control
-# For 2024-03-26, 35,043 for control
-visits_post_id %>%
-  filter(EncounterDate == IndexDate,
-         Intervention == 0) %>%
-  nrow()
-
-# How many visits in the mod_data[[ee]] data frame.
-# n.b. data may be further filtered to visits within 18 months of the index
-# date in subsequent analysis steps
-# For 2024-03-26, 210,124 overall (recorded 07/10/2024)
-#  - same number if the first non-wpv intervention visit with a weight is
-#   switched to the control phase, could just be that the rows are switched
-mod_data[["ee"]] %>%
-  filter(N_months_post_id <= 18) %>%
-  nrow()
-
-mod_data[["ee"]] %>%
-  filter(N_months_post_id <= 18) %>%
-  group_by(Phase) %>%
-  count()
-
-
-# Count lines of uncommented code
-# Declare line counting function -----------------------------------------------
-foo <- function(path) {
-  rln <- read_lines(path)
-  rln <- rln[-grep(x = trimws(rln), pattern = "^#")] # Remove comments
-  rln <- rln[trimws(rln) != ""] # Remove those that are blank spaces
-  return(length(rln))
-}
-
-# Set directory to emr processing subscripts directory
-files <- list.files(str_c(emr_dir, "subscripts"), pattern = ".R")
-
-# Set an empty data frame ------------------------------------------------------
-count <-  NULL
-
-# Loop through EMR subscripts and count the number of lines
-for (i in 1:length(files)) {
-  count[i] <- foo(str_c(emr_dir, "subscripts/", files[i]))
-}
-
-# Display the lines of uncommented code
-message(str_c(sum(count), " lines of uncommented code."))
-
-# Display the number of scripts required to process the emr data
-message(length(count), " scripts to process EMR data.")
