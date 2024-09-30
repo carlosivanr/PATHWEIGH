@@ -1,0 +1,94 @@
+---
+title: "Per Protoccol"
+format:
+  html:
+    toc: true
+    embed-resources: true
+    # grid:
+    #   sidebar-width: 0px
+    #   body-width: 2000px
+    #   margin-width: 0px
+    #   gutter-width: 1.5rem
+editor: source
+---
+
+```{r, load packages}
+#| echo: false
+pacman::p_load(here,         # For managing directory paths
+               magrittr,     # For the assignment pipe operator %<>%
+               tidyverse,    # For data manipulation tools
+               data.table,   # For reading .csv files
+               openxlsx,     # For reading .xlsx files
+               tictoc,       # For timing and benchmarking functions
+               gtsummary,    # For tables
+               lme4,         # For linear mixed effect models (n.b. no pvals)
+               install = FALSE)
+```
+
+```{r}
+#| echo: false
+
+# Set the project root
+proj_root <- "D:/PATHWEIGH//"
+
+# Set the data delivery date to the appropriate data set
+delivery <- 20240326
+
+# Load ee model data -----------------------------------------------------------
+load(str_c(proj_root, "delivery_", delivery, "/data/mod_data_ee_", delivery, ".Rdata"))
+
+# Filter ee data to 18 months
+ee %<>%
+  filter(N_months_post_id <= 18)
+```
+
+```{r}
+# Create a rudimentary pathweigh tools exposure variable that is based on 
+# whether or not a patient had any exposure to pw tools, and not if the patient had intervention with out
+# PW visits followed by intervention with PW visits
+
+ee %<>%
+    mutate(PW_Visit = if_else(WPV_PW_flow == 1| WPV_WMQ == 1 | WPV_IP == 1 | WPV_TH == 1 | WPV_smart == 1, 1, 0)) 
+
+pp_ids <- ee %>% 
+  filter(Phase == 1,
+         PW_Visit == 1) %>%
+  distinct(Arb_PersonId) %>%
+  pull(Arb_PersonId)
+
+pp_data <- 
+  bind_rows(
+  (ee %>% filter(Phase == 0) %>%
+     mutate(pw = 0)),  
+  (ee %>% filter(Phase == 1, 
+                 Arb_PersonId %in% pp_ids) %>%
+     mutate(pw = 1))
+  )
+```
+
+# The number of patients by the dichotomous variable pw. Where pw indicates that the patient had at least one PATHWEIGH visit during the intervention period
+```{r}
+# Does not consider if the index visit is a pathweigh visit.
+
+pp_data %>%
+  mutate(pw = factor(pw)) %>%
+  group_by(Arb_PersonId, Phase) %>% 
+  slice_head() %>%
+  ggplot(., aes(x = pw, color = Intervention, fill = Intervention)) +
+  geom_bar(position = position_dodge2(preserve = "single"))
+```
+```{r}
+
+pp_data %>%
+  mutate(pw = factor(pw)) %>%
+  group_by(Arb_PersonId, Phase) %>% 
+  slice_head() %>%
+  ungroup() %>%
+  mutate(Phase = ifelse(Phase == 1, "Intervention", "Control"),
+         Any_PW_visit = pw) %>%
+  
+  select(Any_PW_visit, Phase) %>%
+  tbl_summary(by = Phase)
+
+```
+

@@ -1,57 +1,51 @@
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-# Carlos Rodriguez, PhD. CU Anschutz Medical Campus, Dept. of Family Medicine
-# Feb 08, 2023
-# Create enrollment table
+---
+title: "PATHWEIGH Plus Human subjects"
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
 
-# Dependencies: ----------------------------------------------------------------
-# This script functions on the visits_post_id data frame. If using
-# the entire visits data frame then enrollment == 1 needs to be used to capture
-# the same patients.
-
-# Description: -----------------------------------------------------------------
-# 1) This function will generate a gt_summary table in pdf format displaying the
-# number of enrolled patients. 
+execute: 
+  echo: false
+---
 
 
-# 2) Additionally, this function will create an NIH style participant level data
-# file in .csv format. The values of the output .csv file must be copy-pasted 
-# into the file provided by NIH. The NIH-provided file is found in 
-# /PATHWEIGH/Quantitative/Projects/working_file/ParticipantLevelData-Template.csv
+```{r}
+#| echo: false
+pacman::p_load(tidyverse,
+               gtsummary,
+               here,
+               install = FALSE)
 
-# As of 02/09/2023, based on:
-# https://grants.nih.gov/sites/default/files/Participant-level%20data%20template%20tip%20sheet.pdf
-# The participant level data spreadsheet has 4 columns, 
-# Race, Ethnicity, Gender, Age, and Age Unit for each patient that is enrolled
+library(magrittr, include.only =  "%<>%")
 
-# Race values must be: 
-# American Indian, Asian, Black, Hawaiian, More than one race, Unknown, or White
+# Load ee_ene
+load(here("delivery_20240326/data/ee_ene_20240326.RData"))
+```
 
-# Ethnicity values must be: 
-# Not Hispanic or Latino, Hispanic or Latino, or Unknown
 
-# Gender must be: Female, Male, or Unknown
+```{r}
+#| eval: false
+# Buffer chunk
+names(ee_ene)
+table(ee_ene$Eligible)
+table(ee_ene$Enrolled)
+# Only need Race, Ethnicity, Sex, Arb_PersonId to capture one row per patient
 
-# Set Age Unit to Years unless Age is >=90, in which case set to Ninety Plus
+# Then we have to define the variables.
 
-# Set all Age values to "" if Age Unit is Ninety Plus
-# Age must be a whole number
+ee_ene %>%
+  filter(EncounterDate >= IndexDate) %>%
+  nrow()
+```
 
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+```{r}
+data <- ee_ene
+rm(ee_ene)
+```
 
-create_enrollment_table <- function(data){
-  # Capture one record per patient that is enrolled and eligible ---------------
-  
-  # Censored may be broken, modify censor to convert NAs to 0, then run to see
-  # if the values equal the same
-  # If not it could be that we need to filter to the EE only too.
-  # Option 1: Modify Censored
-  data %<>% 
-    filter(Eligible == 1, 
-           Enrolled == 1, 
-           EncounterDate >= IndexDate)
-  
-  # Set to capture the most recent visit
-  data %<>%
+```{r}
+# Set to capture the most recent visit
+data %<>%
     filter(Censored == 0) %>%
     group_by(Arb_PersonId) %>%
     arrange(EncounterDate) %>%
@@ -59,14 +53,10 @@ create_enrollment_table <- function(data){
     ungroup() %>%
     select(Arb_PersonId, Race, Ethnicity, Sex, Age) %>%
     rename(Gender = Sex)
-  
-  # Check the # of rows that result in data after filtering
-  # *** Suggest that Censored is broken.
-  # data %>%
-  #   filter(Censored == 0) %>%
-  #   nrow()
-  
-  # Prepare the race column ----------------------------------------------------
+```
+
+```{r}
+# Prepare the race column ----------------------------------------------------
   # Race values for NIH have to be one of the following (02/09/2023)
   race_vals_nih <- c("White",
                      "Black",
@@ -81,7 +71,7 @@ create_enrollment_table <- function(data){
   
   # Test if the values in the data match those that are required by NIH?
   if(length(race_vals_data[(!race_vals_data %in% race_vals_nih)]) != 0){
-    message("The number of unique Race values in data do not match those required by NIH. Attempting to modify values.")
+    # message("The number of unique Race values in data do not match those required by NIH. Attempting to modify values.")
     
     # These vectors can be appended to incorporate additional values to properly 
     # categorize the EPIC data with the NIH values
@@ -137,12 +127,13 @@ create_enrollment_table <- function(data){
       
       stop("The preceding values have not been correctly set.")
     } else {
-      message("Race values set!")
+      # message("Race values set!")
       }
   }
-  
-  
-  # Prepare the ethnicity column -----------------------------------------------
+```
+
+```{r}
+# Prepare the ethnicity column -----------------------------------------------
   # Ethnicity values have to be one of the following:
   eth_vals_nih <-   c("Hispanic or Latino", 
                            "Not Hispanic or Latino",
@@ -153,7 +144,7 @@ create_enrollment_table <- function(data){
   # Test if the values in the data match those that are required by NIH?
   if(length(eth_vals_data[(!eth_vals_data %in% eth_vals_nih)]) != 0){
     
-    message("The number of unique Ethnicity values in data do not match those required by NIH. Attempting to modify values.")
+    # message("The number of unique Ethnicity values in data do not match those required by NIH. Attempting to modify values.")
     
     data %<>%
       mutate(
@@ -177,12 +168,14 @@ create_enrollment_table <- function(data){
       print(eth_vals_data[(!eth_vals_data %in% eth_vals_nih)])
       stop("The preceding values have not been correctly set.")
     } else {
-      message("Ethnicity values set!")
+      # message("Ethnicity values set!")
       }
   }
-  
-  
-  # Prepare the gender column --------------------------------------------------
+```
+
+
+```{r}
+# Prepare the gender column --------------------------------------------------
   # NIH values have to be one of the following:
   gender_vals_nih <- c("Male", "Female", "Unknown")
   
@@ -222,46 +215,147 @@ create_enrollment_table <- function(data){
       message("Gender values set!")
     }
   }
-  
-  
-  # Prepare the Age Unit column ------------------------------------------------
-  # Create a new columns
-  data$`Age Unit` <- "Years"
-  
-  # Modify those that have 90 or above in age
-  # Set age unit to "Ninety Plus" for any individual with Age >= 90 and 
-  # then set Age to blank, per NIH instructions
-  data %<>%
-    mutate(`Age Unit` = ifelse(Age >= 90, "Ninety Plus", `Age Unit`),
-           Age = ifelse(`Age Unit` == "Ninety Plus", "", Age))
-  
-  # Check the frequencies of the Age_Unit
-  table(data$`Age Unit`)
-  
-  # Set age to 0 significant digits.
-  data$Age <- round(as.numeric(data$Age, 0))
-  
-  
-  # Write participant level data to .csv ---------------------------------------
-  write.csv((select(data, -Arb_PersonId)),
-            file = here(proj_root_dir, "tables", str_c("ParticipantLevelData_", date_max, ".csv")),
-            row.names=FALSE)
-  
-  
-  # Save enrollment table to PDF -----------------------------------------------
-  # Set caption
-  cap <- str_c("**PATHWEIGH:** Enrollment table for data delivery ", date_max)
-  
-  # Save table to pdf
-  data %>%
-    select(-Arb_PersonId, -Age, -`Age Unit`) %>%
+```
+
+```{r}
+#| eval: true
+
+data %>%
+    filter(Gender != "Unknown",
+         Race != "Unknown",
+         Ethnicity != "Unknown") %>%
+    select(-Arb_PersonId, -Age) %>%
+    # mutate(Ethnicity = factor(Ethnicity, levels = c('Not Hispanic or Latino', 'Hispanic or Latino', 'Unknown'))) %>%
     # could add the ordering for the enrollment table here
     #select(White, Black, `American Indian`, Hawaiian, `More than one race`, Unknown) %>%
     gtsummary::tbl_summary(by = Ethnicity) %>%
-    gtsummary::add_overall() %>%
-    gtsummary::modify_caption(cap) %>%
-    gtsummary::as_gt() %>%
-    gt::gtsave( # save table as image
-      filename = here(proj_root_dir, "tables", str_c("enrollment_table_", date_max, "_", Sys.Date(), ".pdf")))
-  
-}
+    gtsummary::add_overall()
+```
+
+
+```{r}
+data %>%
+  filter(Gender != "Unknown",
+         Race != "Unknown",
+         Ethnicity != "Unknown") %>%
+  mutate(Ethnicity = factor(Ethnicity, levels = c('Not Hispanic or Latino', 'Hispanic or Latino'))) %>%
+  mutate(Race = factor(Race, levels = c('American Indian', 'Asian', 'Hawaiian', 'Black', 'White', 'More than one race' ))) %>%
+  select(-Arb_PersonId, -Age) %>%
+  tbl_strata(
+    strata = Ethnicity,
+    .tbl_fun = 
+      ~ .x %>%
+        tbl_summary(by = Gender
+          # stat = all_categorical() ~ "{n}"
+          )
+  )
+```
+
+```{r}
+#| eval: false
+tab1 <-
+data %>%
+  filter(Gender != "Unknown",
+         Race != "Unknown",
+         Ethnicity != "Unknown") %>%
+  # mutate(Ethnicity = factor(Ethnicity, levels = c('Not Hispanic or Latino', 'Hispanic or Latino'))) %>%
+  mutate(Race = factor(Race, levels = c('American Indian', 'Asian', 'Hawaiian', 'Black', 'White', 'More than one race' ))) %>%
+  select(-Arb_PersonId, -Age) %>%
+  tbl_strata(
+    strata = Ethnicity,
+    .tbl_fun = 
+      ~ .x %>%
+        tbl_summary(by = Gender
+          # stat = all_categorical() ~ "{n}"
+          )
+  )
+
+
+tab2 <-
+data %>%
+  select(-Arb_PersonId, -Age) %>%
+  filter(Gender != "Unknown",
+         Race != "Unknown",
+         Ethnicity != "Unknown") %>%
+  mutate(Race = factor(Race, levels = c('American Indian', 'Asian', 'Hawaiian', 'Black', 'White', 'More than one race' ))) %>%
+  group_by(Race) %>%
+  count() %>%
+  rename(Total = n) %>%
+  as_tibble()
+
+tab2 <-
+data %>%
+  filter(Gender != "Unknown",
+        Race != "Unknown",
+        Ethnicity != "Unknown") %>%
+  select(Race) %>%
+  mutate(Race = factor(Race, levels = c('American Indian', 'Asian', 'Hawaiian', 'Black', 'White', 'More than one race' ))) %>%
+  tbl_summary()
+```
+
+```{r}
+#| eval: false
+# Experimental
+tbl_merge(
+  tbls = list(tab1, tab2),
+  tab_spanner = c("", '')
+) %>%
+as_gt()
+```
+
+```{r}
+data %>%
+  select(Ethnicity) %>%
+  filter(Ethnicity != 'Unknown') %>%
+  tbl_summary()
+```
+
+```{r}
+data %>%
+  filter(Ethnicity == 'Not Hispanic or Latino') %>%
+  select(Gender) %>%
+  tbl_summary()
+```
+
+```{r}
+data %>%
+  filter(Ethnicity == 'Hispanic or Latino') %>%
+  select(Gender) %>%
+  tbl_summary()
+```
+
+```{r}
+data %>%
+  filter(Ethnicity == 'Not Hispanic or Latino',
+         Gender == 'Female',
+         Race != 'Unknown') %>%
+  select(Race) %>%
+  tbl_summary()
+```
+```{r}
+data %>%
+  filter(Ethnicity == 'Not Hispanic or Latino',
+         Gender == 'Male',
+         Race != 'Unknown') %>%
+  select(Race) %>%
+  tbl_summary()
+```
+
+```{r}
+data %>%
+  filter(Ethnicity == 'Hispanic or Latino',
+         Gender == 'Female',
+         Race != 'Unknown') %>%
+  select(Race) %>%
+  tbl_summary()
+```
+
+```{r}
+data %>%
+  filter(Ethnicity == 'Hispanic or Latino',
+         Gender == 'Male',
+         Race != 'Unknown') %>%
+  select(Race) %>%
+  tbl_summary()
+```
+

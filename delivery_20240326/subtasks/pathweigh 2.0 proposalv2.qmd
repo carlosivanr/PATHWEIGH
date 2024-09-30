@@ -1,0 +1,128 @@
+---
+title: "PATHWEIGH 2.0 Proposal"
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+
+execute: 
+  echo: false
+---
+
+```{r}
+#| echo: false
+# library(tidyverse)
+# library(gtsummary)
+# library(here)
+pacman::p_load(tidyverse,
+               gtsummary,
+               here,
+               install = FALSE)
+  
+
+# Load visits_post_id
+#load("S:/FM/PATHWEIGH/Quantitative/Projects/dataset_20240326/data/processed_visits_post_id_20240326.RData")
+load(here("delivery_20240326/data/processed_visits_post_id_20240326.RData"))
+```
+
+```{r}
+# Filter to only eligible and enrolled encounters in the intervention phase
+# 260,440 unique observations in intervention
+visits_post_id <- visits_post_id %>%
+  filter(Intervention.factor == "Intervention", WPV > 0)
+```
+
+```{r}
+```
+
+### The total number of PATHWEIGH vists out of the number of discernible care for weight visits (WPVs) in the intervention phase (includes index visits)
+```{r}
+#| eval: false
+visits_post_id %>% 
+  filter(WPV > 0 ) %>%
+  nrow()
+```
+
+```{r}
+visits_post_id %>%
+  select(PW_Visit) %>%
+  tbl_summary()
+```
+
+### The total number of unique PATHWEIGH patients in the intervention out of the total number of unique patients with a discenible care for weight visit
+```{r}
+#| eval: false
+# total number unique patients from the visits
+visits_post_id %>%
+  select(Arb_PersonId) %>%
+  distinct() %>%
+  nrow()
+```
+
+```{r}
+# Get the unique patient ids of patients that had a PW_Visit
+pw_ids <- visits_post_id %>%
+  filter(PW_Visit == 1) %>%
+  select(Arb_PersonId) %>%
+  distinct()
+
+# Create a binary indicator for patients that had a PW_Visit
+visits_post_id <-
+  visits_post_id %>%
+  mutate(PW_Pnt = ifelse(Arb_PersonId %in% pw_ids$Arb_PersonId, 1, 0))
+```
+
+```{r}
+visits_post_id %>%
+  group_by(Arb_PersonId) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(PW_Pnt) %>%
+  tbl_summary()
+```
+
+### The number of unique providers associated with at least one PATHWEIGH visit.
+```{r}
+# Get the unique providers NPI that delivered any pathweigh visit
+pw_providers <- visits_post_id %>%
+  filter(PW_Visit == 1) %>%
+  select(ProviderNpi) %>%
+  distinct()
+```
+
+```{r}
+# Create an indicator column of pcps that delivered pathweigh visits
+visits_post_id <- visits_post_id %>%
+  mutate(PW_PCP = ifelse(ProviderNpi %in% pw_providers$ProviderNpi, 1, 0))
+```
+
+```{r}
+# proportion of providers that delivered pw visits
+visits_post_id %>%
+  filter(Intervention.factor == "Intervention") %>%
+  group_by(ProviderNpi) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(PW_PCP) %>%
+  tbl_summary()
+```
+
+### Maintenance by provider
+
+```{r}
+# Convert WPV to binary to count the number of WPVs by provider
+visits_post_id <- visits_post_id %>%
+  mutate(WPV = ifelse(WPV > 0, 1, 0))
+```
+
+```{r}
+visits_post_id %>%
+  filter(ProviderNpi %in% pw_providers$ProviderNpi) %>%
+  group_by(ProviderNpi) %>%
+  summarise(n_wpvs = sum(WPV),
+            n_pw_visits = sum(PW_Visit)) %>%
+  mutate(prop_pw_visits = (n_pw_visits / n_wpvs) * 100) %>%
+  mutate(cut_prop_pw = cut(prop_pw_visits, breaks = 10 * 0:10)) %>%
+  select(cut_prop_pw) %>%
+  tbl_summary() %>%
+  as_gt()
+```
