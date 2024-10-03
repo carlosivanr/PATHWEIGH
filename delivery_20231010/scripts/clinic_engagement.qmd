@@ -1,0 +1,61 @@
+---
+title: "Pathweigh Engagement"
+format:
+  html:
+    toc: true
+    embed-resources: true
+editor: source
+---
+
+```{r notes}
+# Developed to look at clinic engagement from Johnny's collected data which
+# tabulates the types of interventions that the clinics adopted, such as whether
+# or not they attended zoom intro meetings, in-person_visit,requested_support,
+# used_e-learning, WOF_training, placard_in_use, learning_community,
+# Practice_Champion_Used. Engagement is a summed score of all the available 
+# indicators
+```
+
+
+```{r packages}
+pacman::p_load(here,         # For managing directory paths
+               magrittr,     # For the assignment pipe operator %<>%
+               tidyverse,    # For data manipulation tools
+               gtsummary,    # For tables
+               install = FALSE)
+```
+
+```{r load data}
+clinic_engagement <- read_csv("S:/FM/PATHWEIGH/Quantitative/Projects/working_files/clinic_engagement.csv", col_types = cols())
+
+# Drop any aberrant rows that may have been loaded, but not necessarily part
+# of the data set of interest.
+clinic_engagement %<>% 
+  drop_na(DeptNameEpicId)
+```
+
+# Distribution of clinic engagement variable
+```{r}
+clinic_engagement %>%
+  ggplot(., aes(x = Engagement)) +
+  theme_minimal() +
+  geom_histogram(binwidth = 1, color = "black", alpha = 0.7) +
+  ylab("Count")
+```
+
+
+# Correlation between engagement and percentage of pathweigh visit (data from 20231010)
+```{r}
+clinic_engagement %>%
+  ggplot(., aes(x = Engagement, y = percent_pw_visits)) +
+  geom_point() +
+  theme_minimal()
+```
+```{r}
+cor(clinic_engagement$Engagement, clinic_engagement$percent_pw_visits, method = "pearson")
+```
+```{r}
+# Not significant, p val = 0.07771
+cor.test(clinic_engagement$Engagement, clinic_engagement$percent_pw_visits, method = "pearson")
+```
+

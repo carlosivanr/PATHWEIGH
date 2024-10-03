@@ -1,0 +1,839 @@
+---
+title: "PATHWEIGH Statistical Model Development"
+format:
+  html:
+    toc: true
+    embed-resources: true
+    # grid:
+    #   sidebar-width: 0px
+    #   body-width: 2000px
+    #   margin-width: 0px
+    #   gutter-width: 1.5rem
+      
+editor: source
+---
+
+
+```{r}
+#| echo: false
+# Carlos Rodriguez PhD. CU Dept. of Family Medicine
+# Control Phase Models - Development of the statistical model for the EE and 
+# ENE subgroups in both control and intervention phases.
+```
+
+```{r, load packages}
+#| echo: false
+pacman::p_load(here,         # For managing directory paths
+               magrittr,     # For the assignment pipe operator %<>%
+               tidyverse,    # For data manipulation tools
+               data.table,   # For reading .csv files
+               openxlsx,     # For reading .xlsx files
+               tictoc,       # For timing and benchmarking functions
+               gtsummary,    # For tables
+               DT,
+               car,
+               geepack,
+               install = FALSE)
+```
+
+
+```{r}
+#| echo: false
+
+# Load generate_plot function --------------------------------------------------
+# source(here("scripts/generate_model_plots.R"))
+source("S:/FM/PATHWEIGH/Quantitative/Projects/dataset_20231010/scripts/generate_model_plots.R")
+
+# Load processed data ----------------------------------------------------------
+load(here("data/ee_ene_20231010.RData"))
+# load(here("data/processed_visits_post_id_20231010.RData"))
+# load(here("data/processed_all_visits_20231010.RData"))
+```
+
+
+```{r, echo = FALSE}
+# Set up a data frame to subset the data and work off of
+data <- ee_ene
+```
+
+
+```{r, echo = F}
+# capture the patient ids for those that have more than 1 visit in the control
+# phase to use in the modelling
+con_ids_gt1_visits <-
+  data %>%
+  filter(Intervention == 0,
+         Censored == 0) %>%
+  group_by(Arb_PersonId) %>%
+  count() %>%
+  filter(n > 1) %>%
+  pull(Arb_PersonId)
+
+
+# capture the patient ids for those that have more than 1 visit in the intervention
+# phase to use in the modelling
+int_ids_gt1_visits <-
+  data %>%
+  filter(Intervention == 1,
+         Censored == 0) %>%
+  group_by(Arb_PersonId) %>%
+  count() %>%
+  filter(n > 1) %>%
+  pull(Arb_PersonId)
+```
+
+```{r, echo = F}
+# Declare data preparation function
+prep_data <-  function(data){
+  # Filter rows and select the columns necessary for modeling
+  data %<>%
+  select(Arb_PersonId,
+         Arb_EncounterId,
+         EncounterDate,
+         IndexVisit,
+         WPV,
+         Weight_kgs,
+         Age,
+         Sex,
+         Race_Ethnicity,
+         Year,
+         N_months_post_id,
+         N_days_post_id,
+         BMI,
+         Intervention.factor,
+         EE) %>%
+
+  # Turn WPV from count to a binary indicator
+  mutate(WPV = ifelse(WPV > 0, 1, 0)) %>%
+
+  # Calculate a cumulative sum for the WPV binary indicator
+  group_by(Arb_PersonId) %>%
+  arrange(EncounterDate) %>%
+  mutate(N_prior_WPVs = cumsum(WPV)) %>%
+  ungroup() %>%
+
+  # Subtract 1 from encounters after the index to exclude the current WPV N_prior_WPVs
+  # only if there are more than one N_prior visits. That way at minimum, all rows
+  # have at least 1 prior visit, which should be the requirement since we filter
+  # for patients that have more than one encounter with weight.
+  mutate(N_prior_WPVs = ifelse(N_prior_WPVs > 1, N_prior_WPVs - 1, N_prior_WPVs)) %>%
+
+  # Create weight baseline and weight dependent variables and Year at index visit variable
+  mutate(Weight_bl = ifelse(IndexVisit == 1, Weight_kgs, NA),
+         Weight_dv = ifelse(IndexVisit != 1, Weight_kgs, NA),
+         Year_at_ind = ifelse(IndexVisit == 1, Year,NA)) %>%
+
+  # Convert Weight_bl and Year_at_ind to time invariant variables
+  group_by(Arb_PersonId) %>%
+  fill(Weight_bl, .direction = "updown") %>%
+  fill(Year_at_ind, .direction = "updown") %>%
+  ungroup() %>%
+
+  # Remove the index visits from the data set and any NA Weight_dv values
+  filter(IndexVisit == 0) %>%
+  drop_na(Weight_dv) %>%
+
+  # Factor the Arb_PersonId variable and effect code the Year variable
+  # mutate(Arb_PersonId = factor(Arb_PersonId),
+  #        Year = case_when(
+  #          Year == "Year0" ~ -1,
+  #          Year == "Year1" ~ 0,
+  #          Year == "Year2" ~ 1)) %>%
+    
+  # Factor Arb Person Id,
+  # When incorporating intervention data, the code chunk above does not accomodate Year3
+  mutate(Arb_PersonId = factor(Arb_PersonId)) %>%
+
+  # Create a squared N_days_post_id variable
+  mutate(N_days_post_id_sq = N_days_post_id^2) %>%
+
+  # Categorize Age
+  mutate(Age_cat = ifelse(Age <= 45, "<=45", NA),
+         Age_cat = ifelse(Age > 45 & Age <= 60, "45-60", Age_cat),
+         Age_cat = ifelse(Age > 60, ">60", Age_cat)) %>%
+
+  mutate(Sex = relevel(factor(Sex), ref = "Female"),
+         Age_cat = relevel(factor(Age_cat), ref = "45-60"),
+         Race_Ethnicity = relevel(Race_Ethnicity, ref = "Non-Hispanic White"),
+         Intervention = Intervention.factor) %>%
+    
+  select(-Intervention.factor) %>%
+
+  # Filter observations to 18 months (540 days)
+  filter(N_days_post_id <= 540)
+  
+  # Output of the function
+  return(data)
+  }
+```
+
+
+```{r, echo = F}
+# Create the control data
+mod_data_con <- 
+  data %>%
+  filter(Intervention == 0,
+         Censored == 0,
+         Arb_PersonId %in% con_ids_gt1_visits) %>%
+  prep_data()
+```
+
+
+```{r, echo = F}
+# Create the intervention data
+mod_data_int <- 
+    data %>%
+    filter(Intervention == 1,
+         Censored == 0,
+         Arb_PersonId %in% int_ids_gt1_visits) %>%
+  prep_data()
+```
+
+
+```{r, echo = F}
+# Stack the two data frames together
+mod_data <- bind_rows(mod_data_con, mod_data_int)
+
+
+# Set reference for year at index
+# reference set here since no encounter in intervention will have Year0 as year at index
+mod_data %<>%
+  mutate(Year_at_ind = relevel(factor(Year_at_ind), ref = "Year0"))
+
+# Create number of days after index and after 6 months
+mod_data %<>%
+  # N_days_post_id less than (lt) 180 (6 months)
+  mutate(bin_N_days_post_id_gt_180 = ifelse(N_days_post_id > 180, 1, 0),
+         N_days_post_180 = bin_N_days_post_id_gt_180 * (N_days_post_id - 180))
+
+# create a binary variable of those greater than 30 bmi
+mod_data %<>%
+  mutate(bmi_gt_30 = ifelse(BMI >= 30, 1, 0))
+```
+
+
+```{r, echo = F}
+# Capture the age category and bmi category at the index visit to merge in as a time invariant variable
+time_invariant_vars <- 
+data %>%
+  filter(Censored == 0,
+         IndexVisit ==1,
+         Arb_PersonId %in% mod_data$Arb_PersonId) %>%
+  select(Arb_PersonId, Age, BMI, Intervention.factor) %>% 
+  mutate(Age_cat = ifelse(Age <= 45, "<=45", NA),
+         Age_cat = ifelse(Age > 45 & Age <= 60, "45-60", Age_cat),
+         Age_cat = ifelse(Age > 60, ">60", Age_cat),
+         bmi_gt_30 = ifelse(BMI >= 30, 1, 0),
+         bmi_gt_35 = ifelse(BMI >= 35, 1, 0),
+         bmi_gt_40 = ifelse(BMI >= 40, 1, 0),
+         Arb_PersonId = factor(Arb_PersonId),
+         Intervention = Intervention.factor) %>%
+  select(-Age, -Intervention.factor)
+  
+# Recategorize age to a time invariant version
+mod_data %<>%
+  select(-Age_cat, -bmi_gt_30, -BMI) %>%
+  left_join(.,
+            time_invariant_vars,
+            by = c("Arb_PersonId", "Intervention"))
+
+# Set the reference for intervention and reorder Age_cat
+mod_data %<>%
+  mutate(Intervention = relevel(factor(Intervention), ref = "Control"),
+         Age_cat = factor(Age_cat, levels = c("<=45", "45-60", ">60")),
+         Race_Ethnicity = factor(Race_Ethnicity, levels = c("Non-Hispanic White", "Hispanic or Latino", "Black or African American", "Asian", "Other", "Unknown"))
+)
+```
+
+
+```{r, echo = F, eval=F}
+# Time invariant covariates linked to index date in each phase of the treatment
+# Age_cat - could change across each intervention
+mod_data %>%
+  group_by(Arb_PersonId) %>%
+  summarise(n = n_distinct(Age_cat)) %>%
+  filter(n > 1) %>%
+  nrow()
+
+# Sex - Should not change across the intervention periods
+# Should end up with 0 rows
+mod_data %>%
+  group_by(Arb_PersonId) %>%
+  summarise(n = n_distinct(Sex)) %>%
+  filter(n > 1) %>%
+  nrow()
+
+# Race - Should not change across the intervention periods
+# Should end up with 0 rows
+mod_data %>%
+  group_by(Arb_PersonId) %>%
+  summarise(n = n_distinct(Race_Ethnicity)) %>%
+  filter(n > 1) %>%
+  nrow()
+```
+
+# Eligible and Enrolled Patients - All records in mod_data
+```{r}
+#| echo: false
+#| eval: true
+
+# Counts any given individual in both intervention and control phase
+mod_data %>%
+  filter(EE == 1) %>%
+  mutate(Race_Ethnicity = fct_na_value_to_level(Race_Ethnicity, level = "Unknown")) %>%
+  select(Age, Sex, Race_Ethnicity, Intervention, Weight_bl, Weight_dv, BMI) %>%
+  tbl_summary(by = Intervention,
+              missing = "ifany",
+              statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+              label = list(Race_Ethnicity ~ "Race/Ethnicity")) %>%
+  add_overall() %>%
+  as_flex_table() %>%
+  flextable::autofit()
+```
+
+# Eligible and Enrolled Patients - One record per patient per intervention
+```{r}
+mod_data %>%
+  filter(EE == 1) %>%
+  group_by(Arb_PersonId, Intervention) %>%
+  arrange(EncounterDate) %>%
+  slice_head() %>%
+  ungroup() %>%
+  mutate(Race_Ethnicity = fct_na_value_to_level(Race_Ethnicity, level = "Unknown")) %>%
+  select(Age, Sex, Race_Ethnicity, Intervention, Weight_bl, Weight_dv, BMI) %>%
+  tbl_summary(by = Intervention,
+              missing = "ifany",
+              statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+              label = list(Race_Ethnicity ~ "Race/Ethnicity")) %>%
+  add_overall() %>%
+  as_flex_table() %>%
+  flextable::autofit()
+```
+
+
+# Eligible and Not Enrolled Patients - All records in mod_data
+```{r}
+#| echo: false
+#| eval: true
+
+# Counts any given individual in both intervention and control phase
+mod_data %>%
+  filter(EE == 0) %>%
+  mutate(Race_Ethnicity = fct_na_value_to_level(Race_Ethnicity, level = "Unknown")) %>%
+  select(Age, Sex, Race_Ethnicity, Intervention, Weight_bl, Weight_dv, BMI) %>%
+  tbl_summary(by = Intervention,
+              missing = "ifany",
+              statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+              label = list(Race_Ethnicity ~ "Race/Ethnicity")) %>%
+  add_overall() %>%
+  as_flex_table() %>%
+  flextable::autofit()
+```
+
+
+
+
+# Eligible and Not Enrolled - One record per patient, per intervention phase
+```{r}
+mod_data %>%
+  filter(EE == 0) %>%
+  group_by(Arb_PersonId, Intervention) %>%
+  arrange(EncounterDate) %>%
+  slice_head() %>%
+  ungroup() %>%
+  mutate(Race_Ethnicity = fct_na_value_to_level(Race_Ethnicity, level = "Unknown")) %>%
+  select(Age, Sex, Race_Ethnicity, Intervention, Weight_bl, Weight_dv, BMI) %>%
+  tbl_summary(by = Intervention,
+              missing = "ifany",
+              statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+              label = list(Race_Ethnicity ~ "Race/Ethnicity")) %>%
+  add_overall() %>%
+  as_flex_table() %>%
+  flextable::autofit()
+
+```
+
+
+<!-- # Data explorations -->
+<!-- ## Total number of records in model data -->
+<!-- - Model data consists of encounters for patients with more than one visit in the -->
+<!--   control period. -->
+<!-- ```{r} -->
+<!-- mod_data %>% -->
+<!--   nrow() -->
+<!-- ``` -->
+
+
+<!-- ## Sample size by intervention category -->
+<!-- - Number of records by intervention -->
+<!-- ```{r} -->
+<!-- table(mod_data$Intervention) -->
+<!-- ``` -->
+
+<!-- ## Sample size by Eligible  Enrolled category -->
+<!-- - Number of records by eligible and enrolled -->
+<!-- - 0 == ENE, 1 == EE -->
+<!-- ```{r} -->
+<!-- table(mod_data$EE) -->
+<!-- ``` -->
+<!-- ## Sample  -->
+
+<!-- ## Number of unique patients -->
+<!-- ```{r} -->
+<!-- mod_data %>% -->
+<!--   group_by(Arb_PersonId) %>% -->
+<!--   slice_head() %>% -->
+<!--   nrow() -->
+<!-- ``` -->
+
+<!-- ## Number of unique patients in each group (EE or ENE) -->
+<!-- ```{r} -->
+<!-- mod_data %>% -->
+<!--   group_by(Arb_PersonId) %>% -->
+<!--   slice_head() %>% -->
+<!--   ungroup() %>% -->
+<!--   group_by(EE) %>% -->
+<!--   summarise(n = n_distinct(Arb_PersonId)) -->
+<!-- ``` -->
+
+<!-- ## Number of intervention phases per patient -->
+<!-- - Displays whether a patient had observations in just one phase or both phases of the study -->
+<!-- ```{r} -->
+<!-- mod_data %>% -->
+<!--   group_by(Arb_PersonId) %>% -->
+<!--   summarise(n = n_distinct(Intervention)) %>% -->
+<!--   select(n) %>% -->
+<!--   tbl_summary(label = n ~ "Number of Intervention Phases") -->
+<!-- ``` -->
+
+<!-- ## Number and proportion of patients observed in only one intervention phase of the study -->
+<!-- ```{r} -->
+<!-- ids_w_1_phase <-  -->
+<!--   mod_data %>% -->
+<!--   group_by(Arb_PersonId) %>% -->
+<!--   summarise(n = n_distinct(Intervention)) %>% -->
+<!--   filter(n == 1) %>% -->
+<!--   pull(Arb_PersonId) -->
+
+<!-- mod_data %>% -->
+<!--   filter(Arb_PersonId %in% ids_w_1_phase) %>% -->
+<!--   group_by(Arb_PersonId) %>% -->
+<!--   slice_head() %>% -->
+<!--   ungroup() %>% -->
+<!--   select(Intervention) %>% -->
+<!--   tbl_summary() -->
+<!-- ``` -->
+
+
+<!-- ## Number of unique records in each phase -->
+<!-- - Includes patients that are observed in both phases of the intervention -->
+<!-- ```{r} -->
+<!-- mod_data %>% -->
+<!--   group_by(Arb_PersonId, Intervention) %>% -->
+<!--   slice_head() %>% -->
+<!--   ungroup() %>% -->
+<!--   select(Intervention) %>% -->
+<!--   tbl_summary() -->
+<!-- ``` -->
+
+
+
+<!-- ## Sample size by age category and intervention -->
+<!-- - Displays each patient in each encounter -->
+<!-- - Patients with control and intervention encounters are counted twice -->
+
+<!-- ```{r} -->
+<!-- # table(mod_data$Age_cat) -->
+
+<!-- mod_data %>% -->
+<!--   group_by(Arb_PersonId, Intervention) %>% -->
+<!--   slice_head()%>% -->
+<!--   ungroup %>% -->
+<!--   select(Age_cat, Intervention) %>% -->
+<!--   tbl_summary(by = Intervention) -->
+<!-- ``` -->
+
+
+<!-- ## Sample size by sex category -->
+<!-- - Displays each patient in each encounter -->
+<!-- - Patients with control and intervention encounters are counted twice -->
+
+<!-- ```{r} -->
+<!-- # table(mod_data$Sex) -->
+
+<!-- mod_data %>% -->
+<!--   group_by(Arb_PersonId, Intervention) %>% -->
+<!--   slice_head()%>% -->
+<!--   ungroup %>% -->
+<!--   select(Sex, Intervention) %>% -->
+<!--   tbl_summary(by = Intervention) -->
+<!-- ``` -->
+<!-- ## Sample size by Race_ethnicity category -->
+<!-- - Displays each patient in each encounter -->
+<!-- - Patients with control and intervention encounters are counted twice -->
+
+<!-- ```{r} -->
+<!-- # table(mod_data$Race_Ethnicity, useNA = "ifany") -->
+
+
+<!-- mod_data %>% -->
+<!--   group_by(Arb_PersonId, Intervention) %>% -->
+<!--   slice_head()%>% -->
+<!--   ungroup %>% -->
+<!--   select(Race_Ethnicity, Intervention) %>% -->
+<!--   tbl_summary(by = Intervention) -->
+<!-- ``` -->
+
+<!-- ## Sample size by year at index category -->
+<!-- - Displays each patient in each encounter -->
+<!-- - Patients with control and intervention encounters are counted twice -->
+
+<!-- ```{r} -->
+<!-- table(mod_data$Year_at_ind) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- mod_data %>% -->
+<!--   group_by(Arb_PersonId, Intervention) %>% -->
+<!--   slice_head()%>% -->
+<!--   ungroup %>% -->
+<!--   select(Year_at_ind, Intervention) %>% -->
+<!--   tbl_summary(by = Intervention) -->
+<!-- ``` -->
+
+<!-- ## Average weight by intervention -->
+<!-- ```{r} -->
+<!-- mod_data %>% -->
+<!--   group_by(Intervention) %>% -->
+<!--   summarise(Avg_Weight_dv = mean(Weight_dv)) -->
+<!-- ``` -->
+
+<!-- ## Histograms for numeric variables -->
+<!-- ### Weight at baseline (index visit) -->
+<!-- - Displayed at the patient level in each intervention. -->
+<!-- ```{r, echo  = FALSE, eval = FALSE} -->
+<!-- # Initial version of the histogram displaying counts -->
+<!-- mod_data %>% -->
+<!--   group_by(Arb_PersonId, Intervention) %>% -->
+<!--   slice_head() %>% -->
+<!--   ungroup() %>% -->
+<!--   ggplot(., aes(x=Weight_bl)) +  -->
+<!--   geom_histogram(color = "#1565c0", fill = "#1565c0", alpha = .7) + -->
+<!--   facet_grid(.~Intervention) -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- # Revised version of the histogram displaying proportions -->
+<!-- mod_data %>% -->
+<!--   group_by(Arb_PersonId, Intervention) %>% -->
+<!--   slice_head() %>% -->
+<!--   ungroup() %>% -->
+<!--   ggplot(., aes(x=Weight_bl)) +  -->
+<!--   geom_histogram(aes(y = after_stat(count / ave(count, PANEL, FUN = sum))), color = "#1565c0", fill = "#1565c0", alpha = .7) + -->
+<!--   scale_y_continuous(labels = scales::percent_format()) + -->
+<!--   facet_grid(.~Intervention) + -->
+<!--   ylab("Percentage") -->
+<!-- ``` -->
+
+
+<!-- ### Number of days after index visit -->
+<!-- - Encounter level -->
+<!-- ```{r, echo  = FALSE, eval = FALSE} -->
+<!-- ggplot(mod_data, aes(x=N_days_post_id)) +  -->
+<!--   geom_histogram(color = "#1565c0", fill = "#1565c0", alpha = .7)  + -->
+<!--   facet_grid(.~Intervention) -->
+<!-- ``` -->
+
+
+<!-- ```{r} -->
+<!-- ggplot(mod_data, aes(x=N_days_post_id)) +  -->
+<!--   geom_histogram(aes(y = after_stat(count / ave(count, PANEL, FUN = sum))), color = "#1565c0", fill = "#1565c0", alpha = .7) + -->
+<!--   scale_y_continuous(labels = scales::percent_format()) + -->
+<!--   facet_grid(.~Intervention) + -->
+<!--   ylab("Percentage") -->
+<!-- ``` -->
+
+<!-- ### Number of days after 180 days (6 months) -->
+<!-- - Encounter level -->
+<!-- ```{r, echo  = FALSE, eval = FALSE} -->
+<!-- ggplot(mod_data, aes(x=N_days_post_180)) +  -->
+<!--   geom_histogram(color = "#1565c0", fill = "#1565c0", alpha = .7)  + -->
+<!--   facet_grid(.~Intervention) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- ggplot(mod_data, aes(x=N_days_post_180)) +  -->
+<!--   geom_histogram(aes(y = after_stat(count / ave(count, PANEL, FUN = sum))), color = "#1565c0", fill = "#1565c0", alpha = .7) + -->
+<!--   scale_y_continuous(labels = scales::percent_format()) + -->
+<!--   facet_grid(.~Intervention) + -->
+<!--   ylab("Percentage") -->
+<!-- ``` -->
+
+<!-- ### Weight at encounter (dependent variable) -->
+<!-- - Encounter level -->
+<!-- ```{r, echo  = FALSE, eval = FALSE} -->
+<!-- ggplot(mod_data, aes(x=Weight_dv)) +  -->
+<!--   geom_histogram(color = "#1565c0", fill = "#1565c0", alpha = .7)  + -->
+<!--   facet_grid(.~Intervention) -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- ggplot(mod_data, aes(x=Weight_dv)) +  -->
+<!--   geom_histogram(aes(y = after_stat(count / ave(count, PANEL, FUN = sum))), color = "#1565c0", fill = "#1565c0", alpha = .7) + -->
+<!--   scale_y_continuous(labels = scales::percent_format()) + -->
+<!--   facet_grid(.~Intervention) + -->
+<!--   ylab("Percentage") -->
+<!-- ``` -->
+
+<!-- ### BMI -->
+<!-- ```{r} -->
+<!-- ggplot(mod_data, aes(x=BMI)) +  -->
+<!--   geom_histogram(color = "#1565c0", fill = "#1565c0", alpha = .7)  + -->
+<!--   facet_grid(.~Intervention) -->
+
+<!-- summary(mod_data$BMI) -->
+<!-- ``` -->
+
+
+# Candidate Model
+Variables
+- Intervention (renamed to Phase), numerical binary 
+- EE, numerical binary
+- Weight_dv, numeric continuous, kgs. Taken from encounter
+- Age_cat, character categorical. Captured from index visit in each phase
+  - Where to capture index visit in intervention phase?
+- Sex, character categorical, captured from control phase index visit.
+- Year_at_ind, categorical, captured at the index visit in each phase
+- Weight_bl, numeric continuous, baseline weight, captured at the index visit in each phase
+- N_days_post_id, numeric discrete, number of days between the encounter and the participants index visit
+- N_days_post_180, numeric discrete, number of days between the encounter and the 180day/6month time point of the index visit
+```{r}
+# Make modifications to the names and values of the phase variables so that
+# the output of the lm() summary is not so cumbersome to read
+mod_data %<>%
+  mutate(Phase = Intervention) %>%
+  mutate(Phase = case_match(Phase, 
+                        "Control" ~ 0,
+                        "Intervention" ~ 1))
+
+
+mod_data %<>%
+  mutate(slope1 = EE*Phase,        # EE group in intervention
+         slope2 = EE*(1-Phase),    # EE group in control
+         slope3 = (1-EE)*Phase,    # ENE group in intervention
+         slope4 = (1-EE)*(1-Phase))# ENE group in control
+
+```
+
+
+```{r}
+# Models 4 slopes
+m <- lm(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + EE + Phase +
+          
+          # 1 - Three-way interactions
+          slope1*N_days_post_id + slope1*N_days_post_180 + 
+          
+          # 2 - 
+          slope2*N_days_post_id + slope2*N_days_post_180 + 
+          
+          # 3 - 
+          slope3*N_days_post_id + slope3*N_days_post_180 + 
+          
+          # 4 - 
+          slope4*N_days_post_id + slope4*N_days_post_180,
+          
+        # Input data frame
+        data=mod_data)
+
+broom::tidy(m) %>% 
+  print(n = 31)
+    
+broom::glance(m) %>% print(width = Inf)
+# generate_model_plot(mod_data, m)
+
+```
+
+### VIF
+```{r}
+vif(m, type = "predictor")
+```
+
+
+<!-- # Control EE data only -->
+```{r, control ee data only}
+control <- mod_data %>% filter(Intervention == "Control", EE == 1)
+
+m <- lm(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl +
+        N_days_post_id + N_days_post_180,
+        data=control)
+
+# broom::tidy(m)
+# broom::glance(m)
+p_con_ee <- generate_model_plot(control, m)
+```
+
+<!-- # Intervention EE data only -->
+```{r, intervention ee data only}
+intervention <- mod_data %>% filter(Intervention == "Intervention", EE == 1)
+
+m <- lm(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl +
+        N_days_post_id + N_days_post_180,
+        data=intervention)
+
+p_int_ee <- generate_model_plot(intervention, m)
+```
+
+<!-- # Control ENE data only -->
+```{r, control ene data only}
+control_ene <- mod_data %>% filter(Intervention == "Control", EE != 1)
+
+control_ene %<>%
+  mutate(Year_at_ind = factor(Year_at_ind)) #Trying to relevel the data
+
+m <- lm(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl +
+        N_days_post_id + N_days_post_180,
+        data=control_ene)
+
+p_con_ene <- generate_model_plot(control_ene, m)
+```
+
+
+<!-- # Intervention ENE data only -->
+```{r, intervention ene data only}
+intervention_ene <- mod_data %>% filter(Intervention == "Intervention", EE != 1)
+
+m <- lm(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl +
+        N_days_post_id + N_days_post_180,
+        data=intervention_ene)
+
+p_int_ene <- generate_model_plot(intervention_ene, m)
+```
+
+
+
+```{r, echo=F}
+ylimits <- c(104,108)
+p_con_ee <- p_con_ee + ylim(ylimits) + ggtitle("Control EE")
+p_int_ee <- p_int_ee + ylim(ylimits) + ggtitle("Intervention EE")
+
+ylimits_ene <- c(86,87.5)
+p_con_ene <- p_con_ene + ylim(ylimits_ene) + ggtitle("Control ENE")
+p_int_ene <- p_int_ene + ylim(ylimits_ene) + ggtitle("Intervention ENE")
+
+ggpubr::ggarrange(p_con_ee, p_int_ee, p_con_ene, p_int_ene,
+                  common.legend = TRUE, legend = "bottom")
+```
+
+
+
+# Logistic Regression Models
+- All coefficients are exponentiated to reflect odds ratios
+
+## Eligible & Enrolled predicted by Age, Sex, Race, Yeart at index, Baseline Weight, and Intervention phase
+```{r}
+log_data <- 
+  mod_data %>%
+  group_by(Arb_PersonId, Phase) %>%
+  arrange(EncounterDate) %>%
+  slice_head(n = 1) %>%
+  ungroup()
+
+m <- geeglm(EE ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Phase, 
+         data=log_data,
+         id = Arb_PersonId,
+         family = "binomial")
+
+broom::tidy(m, exp = TRUE)
+```
+```{r}
+m <- lm(EE ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Phase, 
+         data=mod_data,
+         # id = Arb_PersonId,
+         family = "binomial")
+
+broom::tidy(m, exp = TRUE)
+
+```
+
+```{r}
+colors <- c("#440154FF","#1565c0")
+mod_data %>%
+mutate(EE = case_match(EE, 
+                        0 ~ "ENE",
+                        1 ~ "EE")) %>%
+ggplot(., aes(x = EE, color = Intervention, fill = Intervention)) +
+  stat_count(alpha = 0.7) +
+  scale_color_manual(values = colors) +
+  scale_fill_manual(values = colors) +
+  theme_minimal() +
+  theme(axis.line = element_line(color = "grey70"))
+```
+
+## Interaction between Weight_bl and Phase
+```{r}
+m <- geeglm(EE ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Phase + Weight_bl * Phase, 
+         data=log_data,
+         id = Arb_PersonId,
+         family = "binomial")
+
+broom::tidy(m, exp = TRUE)
+```
+
+
+## Interaction between Year at index and Phase
+- Model matrix is rank deficient
+```{r}
+# m <- geeglm(EE ~ Age_cat + Sex + Race_Ethnicity + Weight_bl + Phase + Year_at_ind*Phase, 
+#          id = Arb_PersonId,
+#          data=log_data,
+#          family = "binomial")
+# 
+# broom::tidy(m, exp = TRUE)
+```
+
+```{r, echo = FALSE, eval = FALSE}
+# Get model matrix ...
+X <- model.matrix(~~ Age_cat + Sex + Race_Ethnicity + Weight_bl + Phase + Year_at_ind*Phase, data=log_data)
+
+# Get rank of model matrix
+qr(X)$rank
+
+# Get number of parameters of the model = number of columns of model matrix
+ncol(X)
+
+# See if model matrix has full rank
+ncol(X) == qr(X)$rank
+```
+
+## Interaction between Race/ethnicity and Phase
+```{r}
+m <- geeglm(EE ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Phase + Race_Ethnicity*Phase, 
+         data=log_data,
+         id = Arb_PersonId,
+         family = "binomial")
+
+broom::tidy(m, exp = TRUE)
+```
+
+
+## Interaction between Sex and Phase
+```{r}
+m <- geeglm(EE ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Phase + Phase * Sex, 
+         data=log_data,
+         id = Arb_PersonId,
+         family = "binomial")
+
+broom::tidy(m, exp = TRUE)
+```
+
+
+## Interaction with Age
+```{r}
+m <- geeglm(EE ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Phase + Phase * Age_cat, 
+         data=log_data,
+         id = Arb_PersonId,
+         family = "binomial")
+
+broom::tidy(m, exp = TRUE)
+```

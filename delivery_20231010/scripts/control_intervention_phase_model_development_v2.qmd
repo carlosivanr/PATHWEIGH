@@ -1,0 +1,362 @@
+---
+title: "PATHWEIGH Primary Aim Statistical Model"
+format:
+  html:
+    toc: true
+    embed-resources: true
+    # grid:
+    #   sidebar-width: 0px
+    #   body-width: 2000px
+    #   margin-width: 0px
+    #   gutter-width: 1.5rem
+      
+editor: source
+---
+
+
+```{r}
+#| echo: false
+# Carlos Rodriguez PhD. CU Dept. of Family Medicine
+# Control Phase Models - Development of the statistical model for the EE and 
+# ENE subgroups in both control and intervention phases.
+
+# *** Requires tidyverse 1.3.2 with ggplot 3.4.4 otherwise plots result in  
+#     warnings
+# renv::remove("package")
+# renv::install("tidyverse@1.3.2")
+```
+
+```{r, load packages}
+#| echo: false
+pacman::p_load(here,         # For managing directory paths
+               magrittr,     # For the assignment pipe operator %<>%
+               tidyverse,    # For data manipulation tools
+               data.table,   # For reading .csv files
+               openxlsx,     # For reading .xlsx files
+               tictoc,       # For timing and benchmarking functions
+               gtsummary,    # For tables
+               DT,
+               car,
+               geepack,
+               install = FALSE)
+```
+
+
+```{r}
+#| echo: false
+
+# Set the project root
+proj_root <- "S:/FM/PATHWEIGH/Quantitative/Projects/"
+
+# Set the data delivery date
+delivery <- 20231010
+
+# Load generate_plot function --------------------------------------------------
+source(str_c(proj_root, "emr_data_processing/subscripts/generate_model_plots.R"))
+
+# Load processed data ----------------------------------------------------------
+load(str_c(proj_root, "dataset_", delivery, "/data/mod_data_", delivery, ".Rdata"))
+```
+
+
+```{r, echo = F, eval=F}
+# Time invariant covariates linked to index date in each phase of the treatment
+# The following commands serve to validate
+# Age_cat - could change across each intervention
+mod_data %>%
+  group_by(Arb_PersonId) %>%
+  summarise(n = n_distinct(Age_cat)) %>%
+  filter(n > 1) %>%
+  nrow()
+
+# Sex - Should not change across the intervention periods
+# Should end up with 0 rows
+mod_data %>%
+  group_by(Arb_PersonId) %>%
+  summarise(n = n_distinct(Sex)) %>%
+  filter(n > 1) %>%
+  nrow()
+
+# Race - Should not change across the intervention periods
+# Should end up with 0 rows
+mod_data %>%
+  group_by(Arb_PersonId) %>%
+  summarise(n = n_distinct(Race_Ethnicity)) %>%
+  filter(n > 1) %>%
+  nrow()
+```
+
+# Eligible and Enrolled Patients - All records in mod_data
+```{r}
+#| echo: false
+#| eval: true
+
+# Counts any given individual in both intervention and control phase
+mod_data %>%
+  filter(EE == 1) %>%
+  mutate(Race_Ethnicity = fct_na_value_to_level(Race_Ethnicity, level = "Unknown")) %>%
+  select(Age, Sex, Race_Ethnicity, Intervention, Weight_bl, Weight_dv, BMI) %>%
+  tbl_summary(by = Intervention,
+              missing = "ifany",
+              statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+              label = list(Race_Ethnicity ~ "Race/Ethnicity")) %>%
+  add_overall() %>%
+  as_flex_table() %>%
+  flextable::autofit()
+```
+
+# Eligible and Enrolled Patients - One record per patient per intervention
+```{r}
+mod_data %>%
+  filter(EE == 1) %>%
+  group_by(Arb_PersonId, Intervention) %>%
+  arrange(EncounterDate) %>%
+  slice_head() %>%
+  ungroup() %>%
+  mutate(Race_Ethnicity = fct_na_value_to_level(Race_Ethnicity, level = "Unknown")) %>%
+  select(Age, Sex, Race_Ethnicity, Intervention, Weight_bl, Weight_dv, BMI) %>%
+  tbl_summary(by = Intervention,
+              missing = "ifany",
+              statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+              label = list(Race_Ethnicity ~ "Race/Ethnicity")) %>%
+  add_overall() %>%
+  as_flex_table() %>%
+  flextable::autofit()
+```
+
+
+# Eligible and Not Enrolled Patients - All records in mod_data
+```{r}
+#| echo: false
+#| eval: true
+
+# Counts any given individual in both intervention and control phase
+mod_data %>%
+  filter(EE == 0) %>%
+  mutate(Race_Ethnicity = fct_na_value_to_level(Race_Ethnicity, level = "Unknown")) %>%
+  select(Age, Sex, Race_Ethnicity, Intervention, Weight_bl, Weight_dv, BMI) %>%
+  tbl_summary(by = Intervention,
+              missing = "ifany",
+              statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+              label = list(Race_Ethnicity ~ "Race/Ethnicity")) %>%
+  add_overall() %>%
+  as_flex_table() %>%
+  flextable::autofit()
+```
+
+
+
+
+# Eligible and Not Enrolled - One record per patient, per intervention phase
+```{r}
+mod_data %>%
+  filter(EE == 0) %>%
+  group_by(Arb_PersonId, Intervention) %>%
+  arrange(EncounterDate) %>%
+  slice_head() %>%
+  ungroup() %>%
+  mutate(Race_Ethnicity = fct_na_value_to_level(Race_Ethnicity, level = "Unknown")) %>%
+  select(Age, Sex, Race_Ethnicity, Intervention, Weight_bl, Weight_dv, BMI) %>%
+  tbl_summary(by = Intervention,
+              missing = "ifany",
+              statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+              label = list(Race_Ethnicity ~ "Race/Ethnicity")) %>%
+  add_overall() %>%
+  as_flex_table() %>%
+  flextable::autofit()
+```
+
+
+# Candidate Model
+Variables
+- Intervention (renamed to Phase), numerical binary 
+- EE, numerical binary
+- Weight_dv, numeric continuous, kgs. Taken from encounter
+- Age_cat, character categorical. Captured from index visit in each phase
+  - Where to capture index visit in intervention phase?
+- Sex, character categorical, captured from control phase index visit.
+- Year_at_ind, categorical, captured at the index visit in each phase
+- Weight_bl, numeric continuous, baseline weight, captured at the index visit in each phase
+- N_days_post_id, numeric discrete, number of days between the encounter and the participants index visit
+- N_days_post_180, numeric discrete, number of days between the encounter and the 180day/6month time point of the index visit
+```{r}
+# Make modifications to the names and values of the phase variables so that
+# the output of the lm() summary is not so cumbersome to read
+mod_data %<>%
+  mutate(Phase = Intervention) %>%
+  mutate(Phase = case_match(Phase, 
+                        "Control" ~ 0,
+                        "Intervention" ~ 1))
+
+
+mod_data %<>%
+  mutate(slope1 = EE*Phase,        # EE group in intervention
+         slope2 = EE*(1-Phase),    # EE group in control
+         slope3 = (1-EE)*Phase,    # ENE group in intervention
+         slope4 = (1-EE)*(1-Phase))# ENE group in control
+
+```
+
+```{r, eval = FALSE, echo = FALSE}
+ee <- mod_data %>%
+  filter(EE == 1)
+
+
+m <- lm(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl +
+        N_days_post_id + N_days_post_180 + 
+        EE + EE * N_days_post_id + EE * N_days_post_180 +
+        Intervention + Intervention * N_days_post_id + Intervention * N_days_post_180,
+        data=ee)
+```
+
+
+```{r}
+# Models 4 slopes
+m <- lm(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + EE + Phase +
+          
+          # 1 - Three-way interactions
+          slope1:N_days_post_id + slope1:N_days_post_180 + 
+          
+          # 2 - 
+          slope2:N_days_post_id + slope2:N_days_post_180 + 
+          
+          # 3 - 
+          slope3:N_days_post_id + slope3:N_days_post_180 + 
+          
+          # 4 - 
+          slope4:N_days_post_id + slope4:N_days_post_180,
+          
+        # Input data frame
+        data=mod_data)
+
+broom::tidy(m) %>% 
+  print(n = 31)
+    
+broom::glance(m) %>% print(width = Inf)
+# generate_model_plot(mod_data, m)
+
+```
+
+### VIF
+```{r}
+vif(m, type = "predictor")
+```
+
+
+<!-- # Control EE data only -->
+```{r, control ee data only}
+control <- mod_data %>% filter(Intervention == "Control", EE == 1)
+
+m <- lm(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl +
+        N_days_post_id + N_days_post_180,
+        data=control)
+
+# broom::tidy(m)
+# broom::glance(m)
+p_con_ee <- generate_model_plot(control, m)
+```
+
+<!-- # Intervention EE data only -->
+```{r, intervention ee data only}
+#| warning: false  
+
+intervention <- mod_data %>% filter(Intervention == "Intervention", EE == 1)
+
+m <- lm(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl +
+        N_days_post_id + N_days_post_180,
+        data=intervention)
+
+p_int_ee <- generate_model_plot(intervention, m)
+```
+
+<!-- # Control ENE data only -->
+```{r, control ene data only}
+#| warning: false  
+
+control_ene <- mod_data %>% filter(Intervention == "Control", EE != 1)
+
+control_ene %<>%
+  mutate(Year_at_ind = factor(Year_at_ind)) #Trying to relevel the data
+
+m <- lm(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl +
+        N_days_post_id + N_days_post_180,
+        data=control_ene)
+
+p_con_ene <- generate_model_plot(control_ene, m)
+```
+
+
+<!-- # Intervention ENE data only -->
+```{r, intervention ene data only}
+#| warning: false  
+
+intervention_ene <- mod_data %>% filter(Intervention == "Intervention", EE != 1)
+
+m <- lm(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl +
+        N_days_post_id + N_days_post_180,
+        data=intervention_ene)
+
+p_int_ene <- generate_model_plot(intervention_ene, m)
+```
+
+
+
+```{r, echo=F}
+#| warning: false  
+
+ylimits <- c(104,108)
+p_con_ee <- p_con_ee + ylim(ylimits) + ggtitle("Control EE")
+p_int_ee <- p_int_ee + ylim(ylimits) + ggtitle("Intervention EE")
+
+ylimits_ene <- c(86,87.5)
+p_con_ene <- p_con_ene + ylim(ylimits_ene) + ggtitle("Control ENE")
+p_int_ene <- p_int_ene + ylim(ylimits_ene) + ggtitle("Intervention ENE")
+
+ggpubr::ggarrange(p_con_ee, p_int_ee, p_con_ene, p_int_ene,
+                  common.legend = TRUE, legend = "bottom")
+```
+
+
+### Contrast
+```{r}
+# Models 4 slopes
+m <- lm(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + EE + Phase +
+          
+          # 1 - Three-way interactions
+          slope1:N_days_post_id + slope1:N_days_post_180 + 
+          
+          # 2 - 
+          slope2:N_days_post_id + slope2:N_days_post_180 + 
+          
+          # 3 - 
+          slope3:N_days_post_id + slope3:N_days_post_180 + 
+          
+          # 4 - 
+          slope4:N_days_post_id + slope4:N_days_post_180,
+          
+        # Input data frame
+        data=mod_data)
+
+broom::tidy(m) %>% 
+  print(n = 31)
+    
+broom::glance(m) %>% print(width = Inf)
+# generate_model_plot(mod_data, m)
+```
+
+```{r}
+vector <- c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,-1,-1)
+
+# Check if contrast vector matches the length of coefficients
+if(length(vector) != length(m$coefficients)){
+  warning("Length of vector must match length of coefficients")
+}
+
+K <- matrix(vector, 1)
+t <- multcomp::glht(m, linfct = K)
+summary(t)
+```
+```{r}
+
+```
+

@@ -45,7 +45,7 @@
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-capture_medications <- function(temp){
+capture_medications <- function(temp) {
   # tic()
   
   # Set the number of days prior to and after the index/reference visit
@@ -127,6 +127,9 @@ capture_medications <- function(temp){
   meds_sub <- meds %>%
     filter(ActiveMed == "Y", Arb_PersonId %in% distinct_pts_x_ind$Arb_PersonId) %>%
     mutate(across(MedicationName:GenericName, tolower))
+  
+  # Remove any duplicated rows
+  meds_sub <- meds_sub[!duplicated(meds_sub),]
   
   # Check to see that all values are unique
   if (n_distinct(meds_sub) != dim(meds_sub)[1]){

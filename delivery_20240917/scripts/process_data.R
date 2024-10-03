@@ -90,15 +90,13 @@ library(openxlsx)
 library(furrr)
 
 # Specify parameters -----------------------------------------------------------
-RData <- "20240326.RData" # Used as an out to write files
-data_delivery_date <- 20240326
+RData <- "20240917.RData" # Used as an out to write files
+# Set data delivery date as numerical
+data_delivery_date <- 20240917
 
 # For the proc_ene script
 date_min <- as.Date("2020-03-17")
 date_max <- as.Date(lubridate::ymd(data_delivery_date))
-
-# *** need to Cut off index date at 03/16/2024. No one after index date is after
-# 3/16/2024
 
 
 # Source sub-scripts -----------------------------------------------------------
@@ -208,6 +206,7 @@ invisible(gc())
 # Sets Cohort and whether or not the patient was enrolled
 visits <- set_index_date(visits)
 
+
 # Last visit in control phase --------------------------------------------------
 # Set the last visit in control's weight, from the first visit in the
 # intervention if and only if the first intervention has a weight, otherwise
@@ -226,7 +225,7 @@ visits <- set_index_date(visits)
 ee <- visits %>%
   filter(
     Enrolled == 1,
-    EncounterDate >= IndexDate
+    EncounterDate >= IndexDate,
   )
 
 ee_ids <- ee$Arb_PersonId
@@ -241,6 +240,7 @@ ene <- visits %>%
     !Arb_PersonId %in% ee_ids,
     EncounterDate >= IndexDate
   )
+
 
 # Process EE and ENE for labs and comorbidities --------------------------------
 # Process the ee and ene data for labs, procedures, referrals, EOSS, and
@@ -279,6 +279,24 @@ ee_ene %<>%
 ee_ene %<>%
   mutate(EE = ifelse(Arb_PersonId %in% ee_ids, 1, 0))
 
+
+# Cut off index date at 03/16/2024. No one after index date 3/16/2024 should be 
+# enrolled.
+if (data_delivery_date == 20240917) {
+  # Get the ids that are enrolled past the cut off
+  ids <-
+  ee_ene %>%
+    filter(IndexVisit == 1,
+           EncounterDate >= "2024-03-17") %>%
+    pull(Arb_PersonId)
+
+  # Remove the visits from those enrolled after the cutoff date
+  ee_ene <- ee_ene %>%
+    filter(!Arb_PersonId %in% ids)
+}
+
+
+
 ## Break ee_ene data frame apart into EE (visits_post_id) and ENE ----
 # visits_post_id naming maintained to work with legacy and downstream processing
 # steps such as creating the enrollment table and the safety officer table.
@@ -305,9 +323,9 @@ create_enrollment_table(visits_post_id)
 
 # *** requires processed labs, procedures, and comorbidities
 # *** Currently uses visits post id, but it may be worth using mod_data
-# if (data.frame(grep("O2CPAPBIPAP", (names(visits_post_id)))) %>% nrow() > 0) {
-#   create_safety_officer_table(visits_post_id, date_2 = date_min)
-# }
+if (data.frame(grep("O2CPAPBIPAP", (names(visits_post_id)))) %>% nrow() > 0) {
+  create_safety_officer_table(visits_post_id, date_2 = date_min)
+}
 
 # Make mod_data ----------------------------------------------------------------
 # Create a data frame for the primary aim statistical models. Automatically
@@ -326,7 +344,7 @@ invisible(gc())
 # Save datasets ----------------------------------------------------------------
 # can also use a substring on RData to just get the date.
 save(visits,
-     file = here(proj_root_dir, "data", str_c("processed_all_visits_", RData))
+  file = here(proj_root_dir, "data", str_c("processed_all_visits_", RData))
 )
 
 save(

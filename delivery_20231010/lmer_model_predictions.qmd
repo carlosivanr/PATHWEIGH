@@ -1,0 +1,1117 @@
+---
+title: "Linear Mixed Effect Models"
+format:
+  html:
+    toc: true
+    embed-resources: true
+    # grid:
+    #   sidebar-width: 0px
+    #   body-width: 2000px
+    #   margin-width: 0px
+    #   gutter-width: 1.5rem
+editor: source
+---
+
+```{r}
+
+```
+
+```{r, load packages}
+#| echo: false
+pacman::p_load(here,         # For managing directory paths
+               magrittr,     # For the assignment pipe operator %<>%
+               tidyverse,    # For data manipulation tools
+               data.table,   # For reading .csv files
+               openxlsx,     # For reading .xlsx files
+               tictoc,       # For timing and benchmarking functions
+               gtsummary,    # For tables
+               DT,
+               car,
+               geepack,
+               lme4,
+               install = FALSE)
+```
+
+```{r}
+#| echo: false
+
+# Set the project root
+proj_root <- "S:/FM/PATHWEIGH/Quantitative/Projects/"
+
+# Set the data delivery date to the appropriate data set
+delivery <- 20240326
+
+# Load ee model data -----------------------------------------------------------
+load(str_c(proj_root, "dataset_", delivery, "/data/mod_data_ee_", delivery, ".Rdata"))
+
+# Filter ee data to 18 months
+ee %<>%
+  filter(N_months_post_id <= 18)
+
+# # Load ee model data -----------------------------------------------------------
+# load(here("mod_data_ee_20240326.RData"))
+# 
+# # Filter ee data to 18 months after the index date
+# ee %<>%
+#   filter(N_months_post_id <= 18)
+```
+
+# Boxplots of all weight values in each month after the index date
+```{r}
+ee %>%
+  mutate(across(c(N_months_post_id, Phase), ~ factor(.))) %>%
+  ggplot(., aes(x = N_months_post_id, y = Weight_dv, color = Phase, fill = Phase)) +
+  # geom_boxplot(alpha = 0.3, outlier.shape = NA) +
+  geom_boxplot(alpha = 0.3) +
+  theme_minimal()
+```
+
+# The number of encounters per patient in each phase
+```{r}
+tbl <- ee %>%
+  group_by(Arb_PersonId, Intervention) %>%
+  count() %>%
+  ungroup() %>%
+  mutate(n = factor(n),) %>%
+  select(-Arb_PersonId) %>%
+  tbl_summary(by = Intervention)
+
+tbl
+
+# tbl %>%
+#   as_tibble() %>%
+#   write_csv(., file = "number_of_visits_per_pt.csv")
+```
+
+```{r}
+ee %>%
+  group_by(Arb_PersonId, Intervention) %>%
+  count() %>%
+  ungroup() %>%
+  mutate(n = factor(n)) %>%
+  ggplot(., aes(x = n, color = Intervention, fill= Intervention)) +
+  geom_bar(position = position_dodge2(preserve = "single")) +
+  theme_minimal() +
+  labs(title = "The number of visits per patient in each phase")
+```
+
+```{r}
+ee %>%
+  group_by(Arb_PersonId, Intervention) %>%
+  count() %>%
+  ungroup() %>%
+  mutate(n_visits = n) %>%
+  select(-n) %>%
+  group_by(Intervention, n_visits) %>%
+  summarise(n = n()) %>%
+  mutate(perc = n/sum(n)) %>%
+  ggplot(., aes(x = n_visits, y = perc, fill = Intervention)) +
+  geom_bar(stat = "identity", position = position_dodge2(preserve = "single")) +
+  scale_y_continuous(labels = scales::label_percent()) +
+  theme_minimal()
+```
+
+# The number of visits by the number of months after the index date
+```{r}
+ee %>%
+  select(N_months_post_id, Intervention) %>%
+  mutate(N_months_post_id = factor(N_months_post_id) ) %>%
+  ggplot(., aes(x = N_months_post_id, color = Intervention, fill = Intervention)) +
+  geom_bar(position = position_dodge2(preserve = "single")) +
+  theme_minimal()
+```
+
+```{r}
+# Number of visits per patient
+visits_per_pt <- ee %>%
+  group_by(Arb_PersonId, Intervention) %>%
+  count()%>%
+  ungroup() %>%
+  mutate(n_visits_per_pt = n) %>%
+  select(Arb_PersonId, Intervention, n_visits_per_pt)
+```
+
+
+```{r}
+data <- ee %>%
+  left_join(., visits_per_pt, by = c("Arb_PersonId", "Intervention")) %>%
+  select(Arb_PersonId, N_months_post_id, Intervention, n_visits_per_pt) %>%
+  mutate(across(c(N_months_post_id, n_visits_per_pt), ~ factor(.))) %>%
+  mutate(n_visits_per_pt = fct_collapse(n_visits_per_pt,
+                                        `1` = 1,
+                                        `2-3` = c(2, 3),
+                                        `4-5` = c(4, 5),
+                                        `6+` = c(visits_per_pt %>% filter(n_visits_per_pt >= 6) %>% distinct(n_visits_per_pt) %>% pull(n_visits_per_pt)))) 
+
+data %>%
+  ggplot(., aes(x = N_months_post_id, color = Intervention, fill = Intervention)) +
+  geom_bar(position = position_dodge2(preserve = "single")) +
+  theme_minimal() +
+  facet_wrap(~n_visits_per_pt) +
+  labs(title = "The number of visits at each month after index faceted by the number of total visits \n per patient.") +
+  theme(legend.position = "bottom")
+```
+
+
+```{r}
+data %>%
+  group_by(Intervention, n_visits_per_pt, N_months_post_id) %>%
+  summarise(n = n()) %>%
+  mutate(perc = n/sum(n)) %>%
+  ggplot(., aes(x = N_months_post_id, y = perc, fill = Intervention)) +
+  geom_bar(stat = "identity", position = position_dodge2(preserve = "single")) +
+  scale_y_continuous(labels = scales::label_percent()) +
+  theme_minimal() +
+  facet_wrap(~n_visits_per_pt) +
+  labs(title = "The number of visits at each month after index \n faceted by the number of total visits per patient.") +
+  theme(legend.position = "bottom")
+```
+
+
+```{r}
+data %>%
+  select(N_months_post_id, Intervention, n_visits_per_pt) %>%
+  tbl_strata(
+    strata = Intervention,
+    .tbl_fun = 
+      ~.x %>%
+      tbl_summary(by = n_visits_per_pt,
+                  digits = everything() ~ c(0,2))
+  )
+```
+
+# Model variables for mod_data data with EE patients
+Variables
+- Intervention (renamed to Phase), numerical binary 
+- EE, numerical binary
+- Weight_dv, numeric continuous, kgs. Taken from encounter
+- Age_cat, character categorical. Captured from index visit in each phase
+  - Where to capture index visit in intervention phase?
+- Sex, character categorical, captured from Intervention phase index visit.
+- Year_at_ind, categorical, captured at the index visit in each phase
+- Weight_bl, numeric continuous, baseline weight, captured at the index visit in each phase
+- N_days_post_id, numeric discrete, number of days between the encounter and the participants index visit
+- N_days_post_180, numeric discrete, number of days between the encounter and the 180day/6month time point of the index visit
+```{r}
+#          slope1 = EE*Phase,        # EE group in intervention
+#          slope2 = EE*(1-Phase),    # EE group in control
+#          slope3 = (1-EE)*Phase,    # ENE group in intervention
+#          slope4 = (1-EE)*(1-Phase))# ENE group in control
+```
+
+
+# lmer() with EE only, categorical values
+In this section, a lmer model is fit to a dataset consisting of categorical covariates. The resulting model and input data are used to derive predicted values. The observed and predicted values are then averaged by each month after the index date and in each treatment phase and then plotted.
+```{r}
+# LMER clustered on patient id
+lmer_mod <- lmer(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + slope1 +
+          # 1 - Intervention group
+          slope1:N_days_post_id + slope1:N_days_post_180 + 
+          
+          # 2 - Control group
+          slope2:N_days_post_id + slope2:N_days_post_180 + 
+          
+          # Random effects, dept name causes convergence warnings   
+          # (1| DepartmentExternalName) + (1| Arb_PersonId),
+          (1|Arb_PersonId),
+                
+          # Input data frame
+          data=ee)
+ 
+broom.mixed::tidy(lmer_mod)
+```
+
+```{r}
+predicted <- predict(lmer_mod, ee, re.form=NA, type="response")
+
+# Create a data set of the predicted values and categorical lmer data input
+lmer_cat_data <- bind_cols(ee, data.frame(predicted)) %>%
+  rename(observed = Weight_dv)
+
+# Plot data
+# To plot the predicted and average values, first select the columns of interest,
+# then group data by Phase and the number of months after index visit,
+# then calculate means, drop the grouping, and recode the Phase values to be 
+# able to display a faceted plot.
+# Next, convert the data to long and plot 
+lmer_cat_data %>%  
+  select(Phase, N_months_post_id, observed, predicted) %>%
+  group_by(Phase, N_months_post_id) %>%
+  summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
+  mutate(Phase = case_match(Phase, 0 ~ "Control",
+                            1 ~ "Intervention")) %>%
+  pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~Phase) +
+  theme_minimal()
+
+ggsave("lmer_cat_obs_vs_predicted.jpeg")
+```
+
+```{r}
+# Create a vector of 10 randomly selected subjects
+subj_samp <- 
+lmer_cat_data %>%
+  group_by(Arb_PersonId) %>%
+  summarise(n = n_distinct(Phase)) %>%
+  filter(n > 1) %>%
+  select(Arb_PersonId) %>%
+  distinct() %>%
+  sample_n(8) %>%
+  pull(Arb_PersonId)
+
+
+lmer_cat_data %>%
+  filter(Arb_PersonId %in% subj_samp) %>%
+  select(Arb_PersonId, Phase, N_days_post_id, N_months_post_id, observed, predicted) %>%
+  mutate(Phase = case_match(Phase, 0 ~ "Control",
+                            1 ~ "Intervention")) %>%
+  group_by(Arb_PersonId, Phase) %>%
+  pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
+  ungroup() %>%
+  # filter(Type == "observed") %>%
+  ggplot(., aes(x = N_days_post_id, y = Avg_Weight_kgs, color = Type)) +
+  geom_line(aes(group=c(Type))) +
+  # geom_point() +
+  facet_grid(Phase ~ Arb_PersonId) +
+  theme_minimal()
+```
+
+
+```{r}
+# Count the sample size for each month after index and phase 
+lmer_cat_data %>%
+  select(Phase, N_months_post_id, observed, predicted) %>%
+  group_by(Phase, N_months_post_id) %>%
+  count() %>%
+  mutate(N_days_post_id = N_months_post_id * 30)
+```
+
+# lmer() residuals vs baseline weight
+```{r}
+tic()
+lmer_cat_data %>%
+  select(Phase, Weight_bl) %>%
+  mutate(residual = resid(lmer_mod),
+         Phase = case_match(Phase, 0 ~ "Control",
+                            1 ~ "Intervention")) %>%
+  ggplot(., aes(x = Weight_bl, y = residual, color = Phase)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(method = loess, color = "blue", se = FALSE) +
+  facet_wrap(~ Phase) +
+  theme_minimal() +
+  ylim(c(-2, 2))
+toc()
+```
+
+# lmer() with EE only, binary variables dataset
+In this section, the goal is to create two new datasets. The first data set is a conversion of the observed data with categorical covariates to one with the covariates expressed as binary variables only. The binary data set is used to fit a lmer model and to create a second dataset of the average hypothetical patient for each month after the index date and in each treatment phase. This average dataset will be used to generate predicted values for plotting along with observed values similar to the section above.
+```{r}
+# Convert all categorical variables to sets of binary variables
+ee_bin <- 
+  ee %>% 
+  mutate(age_lt_45 = ifelse(Age_cat == "<=45", 1, 0),
+         age_45_to_60 = ifelse(Age_cat == "45-60", 1, 0),
+         age_gt_60 = ifelse(Age_cat == ">60", 1, 0),
+         sex_m = ifelse(Sex == "Male", 1, 0),
+         sex_f = ifelse(Sex == "Female", 1, 0),
+         reth_nhw = ifelse(Race_Ethnicity == "Non-Hispanic White", 1, 0),
+         reth_his = ifelse(Race_Ethnicity == "Hispanic or Latino", 1, 0),
+         reth_blk = ifelse(Race_Ethnicity == "Black or African American", 1, 0),
+         reth_asn = ifelse(Race_Ethnicity == "Asian", 1, 0),
+         reth_oth = ifelse(Race_Ethnicity == "Other", 1, 0),
+         reth_ukn = ifelse(Race_Ethnicity == "Unknown", 1, 0),
+         year_at_ind0 = ifelse(Year_at_ind == "Year0", 1, 0),
+         year_at_ind1 = ifelse(Year_at_ind == "Year1", 1, 0),
+         year_at_ind2 = ifelse(Year_at_ind == "Year2", 1, 0),
+         year_at_ind3 = ifelse(Year_at_ind == "Year3", 1, 0))
+
+# Convert PHQ2:GAD7 to numeric, to be able to use the summarise_all() function
+# ee_bin %<>%
+#   mutate(across(PHQ2:GAD7, ~ as.numeric(.x)))
+```
+
+
+```{r}
+# Linear mixed model with binary variables
+lmer_mod_bin <- lmer(Weight_dv ~ 
+                   
+          # age
+          age_45_to_60 + age_gt_60 + 
+           
+          # sex
+          sex_m + 
+          
+          # race ethnicity
+          reth_his + reth_blk + reth_asn + reth_oth + reth_ukn + 
+           
+          # year at index
+          year_at_ind1 + year_at_ind2 + year_at_ind3 + 
+           
+          # Weight at baseline
+          Weight_bl + slope1 +
+             
+          # Slope1 is the same as Phase/Intervention group
+          slope1:N_days_post_id + slope1:N_days_post_180 + 
+          
+          # 2 - control phase
+          slope2:N_days_post_id + slope2:N_days_post_180 + 
+          
+          # Clustering, convergence issues with both dept and personid   
+          # (1| DepartmentExternalName) + (1| Arb_PersonId),
+          (1| Arb_PersonId),
+                
+          # Input data frame
+          data=ee_bin
+          
+          # Set REML
+          # REML = TRUE
+          
+          # control = lmerControl(optimizer = "nloptwrap", optCtrl = list(algorithm = "NLOPT_LN_NELDERMEAD"))
+          )
+
+
+broom.mixed::tidy(lmer_mod_bin) %>%
+  print(n = 81)
+```
+```{r}
+broom.mixed::tidy(lmer_mod)
+```
+
+## Average dataset for predictions with slice head()
+Takes one row per patient in each phase then proceeds to create the average patient. This approach essentially creates the average patient in control and the average patient in intervention with values taken from the index date.
+### Control
+```{r}
+# Create a subset of control phase data from the binary data set
+ee_con <- ee_bin %>% filter(Phase == 0)
+
+# Create a sequence
+# 18 * 30 = 540
+N_days_post_id <- seq(0, 540, by = 30)
+
+# Convert vector to data frame consisting of 0-18 months in control
+avg_data_con <- data.frame(N_days_post_id)
+
+# Create a vector of number of days after 180 days (6 months)
+avg_data_con$N_days_post_180 <- c(rep(0, 7),seq(30, 360, by = 30))
+
+# Calculate all means in control phase data, taking one row per patient. These
+# should all be time invariant variables like age, race, year at index
+means_con <- ee_con %>%
+  group_by(Arb_PersonId) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(Phase:slope2, 
+         Weight_bl,
+         age_lt_45:year_at_ind3) %>%
+  summarise_all(list(mean))
+
+# Create control data subset where the time invariant variables are set to the
+# means calculated in the previous step, and where Phase, slope1 and slope2 are
+# set
+avg_data_con %<>%
+  mutate(age_45_to_60 = means_con$age_45_to_60,
+         age_gt_60 = means_con$age_gt_60,
+         sex_m = means_con$sex_m,
+         reth_his = means_con$reth_his,
+         reth_blk = means_con$reth_blk,
+         reth_asn = means_con$reth_asn,
+         reth_oth = means_con$reth_oth,
+         reth_ukn = means_con$reth_ukn,
+         year_at_ind1 = means_con$year_at_ind1,
+         year_at_ind2 = means_con$year_at_ind2,
+         year_at_ind3 = means_con$year_at_ind3,     
+         Weight_bl = means_con$Weight_bl,
+         Phase = 0,
+         slope1 = 0,
+         slope2 = 1)
+
+# How many patients used for each month average
+avg_data_con_n <- ee_con %>%
+  group_by(N_months_post_id)%>%
+  count()%>%
+  ungroup() %>%
+  mutate(N_days_post_id = N_months_post_id * 30) %>%
+  select(-N_months_post_id)
+
+avg_data_con %<>%
+  left_join(., avg_data_con_n, by = "N_days_post_id")
+```
+
+### Intervention
+```{r}
+# Create a subset of intervention phase data
+ee_int <- ee_bin %>% filter(Phase == 1)
+
+# 18 months worth of n_days
+# 18 * 30 = 540
+N_days_post_id <- seq(0, 540, by = 30)
+
+# Convert vector to data frame
+avg_data_int <- data.frame(N_days_post_id)
+
+# Create a vector of number of days after 180 days (6 months)
+avg_data_int$N_days_post_180 <- c(rep(0, 7),seq(30, 360, by = 30))
+
+# Calculate all means in control phase data
+means_int <- ee_int %>%
+  group_by(Arb_PersonId) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(Phase:slope2, 
+         Weight_bl,
+         age_lt_45:year_at_ind3) %>%
+  summarise_all(list(mean))
+
+# Create control data subset
+avg_data_int %<>%
+  mutate(age_45_to_60 = means_int$age_45_to_60,
+         age_gt_60 = means_int$age_gt_60,
+         sex_m = means_int$sex_m,
+         reth_his = means_int$reth_his,
+         reth_blk = means_int$reth_blk,
+         reth_asn = means_int$reth_asn,
+         reth_oth = means_int$reth_oth,
+         reth_ukn = means_int$reth_ukn,
+         year_at_ind1 = means_int$year_at_ind1,
+         year_at_ind2 = means_int$year_at_ind2,
+         year_at_ind3 = means_int$year_at_ind3,     
+         Weight_bl = means_int$Weight_bl,
+         Phase = 1,
+         slope1 = 1,
+         slope2 = 0)
+
+# How many patients used for each month average
+avg_data_int_n <- ee_int %>%
+  group_by(N_months_post_id)%>%
+  count()%>%
+  ungroup() %>%
+  mutate(N_days_post_id = N_months_post_id * 30) %>%
+  select(-N_months_post_id)
+
+avg_data_int %<>%
+  left_join(., avg_data_int_n, by = "N_days_post_id")
+```
+
+### Bind control and intervention
+```{r}
+avg_data <- bind_rows(avg_data_con, avg_data_int)
+
+# write_csv(avg_data, file = here("avg_data.csv"))
+```
+
+### Plot observed values
+```{r}
+# Generate the average observed weight_dv value in each N_month_post_id
+# For each patient, group their data by months after index in each phase and 
+# then average so that if a patient has multiple visits in a given month after
+# index, those weight values will be averaged. Then group data by months after
+# index and average the weight values to obtain on value for each month after 
+# index in each phase, which results in 38 rows of data
+observed <-
+  ee %>%
+    select(Arb_PersonId, Weight_dv, N_months_post_id, Phase) %>%
+    group_by(Arb_PersonId, N_months_post_id, Phase) %>%
+    summarise(Weight_dv = mean(Weight_dv),
+              .groups = "drop") %>%
+    group_by(N_months_post_id, Phase) %>%
+    summarize(Avg_Weight_kgs = mean(Weight_dv),
+              .groups = "drop") %>%
+  mutate(Type = "Observed")
+
+# Plot the observed values
+observed %>%
+  mutate(Phase = ifelse(Phase == 0, "Control", "Intervention")) %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Phase)) +
+  geom_line() +
+  facet_wrap(~Phase) +
+  theme_minimal() +
+  labs(caption = "For each patient, multiple weight values in a given month after index are averaged in each phase. \nThen all values for months after index in each phase are averaged.") +
+  theme(plot.caption = element_text(hjust = 0))
+ 
+ 
+```
+```{r}
+# Plot both intervention and control lines on one plot
+observed %>%
+  mutate(Phase = ifelse(Phase == 0, "Control", "Intervention")) %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Phase)) +
+  geom_line() +
+  # facet_wrap(~Phase) +
+  theme_minimal() #+
+  # geom_smooth(aes(group = Phase), method = lm, se = FALSE, color = "blue", linewidth = 0.5, alpha = 0.5)
+```
+
+### Predicted values, predict()
+```{r}
+# Generate the predicted values using the avg_data and the binary model
+predicted_vals <- predict(lmer_mod_bin, avg_data, re.form=NA, type="response")
+
+# Create a vector in avg_data called predicted vals containing the predicted
+# values
+avg_data$predicted_vals <- predicted_vals
+
+# Create a data set where Type is set to "Predicted", the predicted_vals column
+# is renamed, and 
+predicted <- 
+  avg_data %>%
+  mutate(Avg_Weight_kgs = predicted_vals,
+         Type = "Predicted",
+         N_months_post_id = N_days_post_id/30
+         ) %>%
+  select(N_months_post_id, Phase, Avg_Weight_kgs, Type)
+```
+
+
+### Bind rows and plot lmer with the average person
+```{r}
+bind_rows(observed, predicted) %>%
+  mutate(Phase = case_match(Phase, 0 ~ "Control",
+                            1 ~ "Intervention")) %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~Phase) +
+  theme_minimal() +
+  ylim(c(102,108))
+
+ggsave("lmer_bin_avg_pt.jpeg")
+```
+## Average dataset for predictions do not slice head
+### Control
+```{r}
+# Create a subset of control phase data from the binary data set
+ee_con <- ee_bin %>% filter(Phase == 0)
+
+# Create a sequence
+# 18 * 30 = 540
+N_days_post_id <- seq(0, 540, by = 30)
+
+# Convert vector to data frame consisting of 0-18 months in control
+avg_data_con <- data.frame(N_days_post_id)
+
+# Create a vector of number of days after 180 days (6 months)
+avg_data_con$N_days_post_180 <- c(rep(0, 7),seq(30, 360, by = 30))
+
+# Calculate all means in control phase data
+means_con <- ee_con %>%
+  # group_by(Arb_PersonId) %>%
+  # slice_head() %>%
+  # ungroup() %>%
+  select(Phase:slope2, 
+         Weight_bl,
+         age_lt_45:year_at_ind3) %>%
+  summarise_all(list(mean))
+
+# Create control data subset
+avg_data_con %<>%
+  mutate(age_45_to_60 = means_con$age_45_to_60,
+         age_gt_60 = means_con$age_gt_60,
+         sex_m = means_con$sex_m,
+         reth_his = means_con$reth_his,
+         reth_blk = means_con$reth_blk,
+         reth_asn = means_con$reth_asn,
+         reth_oth = means_con$reth_oth,
+         reth_ukn = means_con$reth_ukn,
+         year_at_ind1 = means_con$year_at_ind1,
+         year_at_ind2 = means_con$year_at_ind2,
+         year_at_ind3 = means_con$year_at_ind3,     
+         Weight_bl = means_con$Weight_bl,
+         Phase = 0,
+         slope1 = 0,
+         slope2 = 1)
+
+# How many patients used for each month average
+avg_data_con_n <- ee_con %>%
+  group_by(N_months_post_id)%>%
+  count()%>%
+  ungroup() %>%
+  mutate(N_days_post_id = N_months_post_id * 30) %>%
+  select(-N_months_post_id)
+
+avg_data_con %<>%
+  left_join(., avg_data_con_n, by = "N_days_post_id")
+```
+
+### Intervention
+```{r}
+# Create a subset of intervention phase data
+ee_int <- ee_bin %>% filter(Phase == 1)
+
+# 18 months worth of n_days
+# 18 * 30 = 540
+N_days_post_id <- seq(0, 540, by = 30)
+
+# Convert vector to data frame
+avg_data_int <- data.frame(N_days_post_id)
+
+# Create a vector of number of days after 180 days (6 months)
+avg_data_int$N_days_post_180 <- c(rep(0, 7),seq(30, 360, by = 30))
+
+# Calculate all means in control phase data
+means_int <- ee_int %>%
+  # group_by(Arb_PersonId) %>%
+  # slice_head() %>%
+  # ungroup() %>%
+  select(Phase:slope2, 
+         Weight_bl,
+         age_lt_45:year_at_ind3) %>%
+  summarise_all(list(mean))
+
+# Create control data subset
+avg_data_int %<>%
+  mutate(age_45_to_60 = means_int$age_45_to_60,
+         age_gt_60 = means_int$age_gt_60,
+         sex_m = means_int$sex_m,
+         reth_his = means_int$reth_his,
+         reth_blk = means_int$reth_blk,
+         reth_asn = means_int$reth_asn,
+         reth_oth = means_int$reth_oth,
+         reth_ukn = means_int$reth_ukn,
+         year_at_ind1 = means_int$year_at_ind1,
+         year_at_ind2 = means_int$year_at_ind2,
+         year_at_ind3 = means_int$year_at_ind3,     
+         Weight_bl = means_int$Weight_bl,
+         Phase = 1,
+         slope1 = 1,
+         slope2 = 0)
+
+# How many patients used for each month average
+avg_data_int_n <- ee_int %>%
+  group_by(N_months_post_id)%>%
+  count() %>%
+  ungroup() %>%
+  mutate(N_days_post_id = N_months_post_id * 30) %>%
+  select(-N_months_post_id)
+
+avg_data_int %<>%
+  left_join(., avg_data_int_n, by = "N_days_post_id")
+```
+
+### Bind control and intervention
+```{r}
+avg_data <- bind_rows(avg_data_con, avg_data_int)
+
+# write_csv(avg_data, file = "avg_data2.csv")
+```
+
+
+### Predicted values, predict()
+```{r}
+predicted_vals <- predict(lmer_mod_bin, avg_data, re.form=NA, type="response")
+
+avg_data$predicted_vals <- predicted_vals
+
+predicted <- 
+  avg_data %>%
+  mutate(Avg_Weight_kgs = predicted_vals,
+         Type = "Predicted",
+         N_months_post_id = round(N_days_post_id/30)) %>%
+  select(N_months_post_id, Phase, Avg_Weight_kgs, Type)
+```
+
+
+### Bind rows and plot lmer with predictions made from the average person dataset
+```{r}
+bind_rows(observed, predicted) %>%
+  filter(N_months_post_id <= 18) %>%
+  mutate(Phase = case_match(Phase, 0 ~ "Control",
+                            1 ~ "Intervention")) %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~Phase) +
+  theme_minimal() +
+  ylim(c(102,108))
+
+
+ggsave("lmer_bin_avg_pt2.jpeg")
+```
+
+## Newest approach
+```{r}
+# Create a subset of control phase data from the binary data set
+ee_con <- ee_bin %>% filter(Phase == 0)
+
+# Create a sequence
+# 18 * 30 = 540
+N_days_post_id <- seq(0, 540, by = 30)
+
+# Convert vector to data frame consisting of 0-18 months in control
+avg_data_con <- data.frame(N_days_post_id)
+
+# Create a vector of number of days after 180 days (6 months)
+avg_data_con$N_days_post_180 <- c(rep(0, 7),seq(30, 360, by = 30))
+
+# Calculate means of the covariates in the control phase
+# Takes one value per patient because all of the covariates should be the same
+# for each visit, the only difference is that for those with more than 2 visits
+# weight_dv will not be an average
+means_con <- ee_con %>%
+  arrange(Arb_PersonId, EncounterDate) %>%
+  select(
+    # Arb_PersonId,
+         N_months_post_id,
+         Phase:slope2, 
+         Weight_bl,
+         age_lt_45:year_at_ind3) %>%
+  group_by(N_months_post_id) %>%
+  # slice_head() %>%
+  # ungroup() %>%
+  # select(Phase:slope2, 
+  #        Weight_bl,
+  #        age_lt_45:year_at_ind3) %>%
+  summarise_all(list(mean)) %>%
+  ungroup()
+
+# Get the average weight values for each month after the index date
+means_dv_con <- ee_con %>%
+  select(Arb_PersonId, 
+         N_months_post_id, Weight_dv) %>%
+  group_by(N_months_post_id) %>%
+  summarise(Weight_dv = mean(Weight_dv))
+
+means_con %<>%
+  left_join(., means_dv_con, by = "N_months_post_id")
+
+avg_data_con %<>%
+  mutate(N_months_post_id = N_days_post_id/30) %>%
+  left_join(., means_con, by = "N_months_post_id") %>%
+  mutate(Phase = 0,
+         slope1 = 0,
+         slope2 = 1)
+
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# Create a subset of intervention phase data from the binary data set
+ee_int <- ee_bin %>% filter(Phase == 1)
+
+# Create a sequence
+# 18 * 30 = 540
+N_days_post_id <- seq(0, 540, by = 30)
+
+# Convert vector to data frame consisting of 0-18 months in control
+avg_data_int <- data.frame(N_days_post_id)
+
+# Create a vector of number of days after 180 days (6 months)
+avg_data_int$N_days_post_180 <- c(rep(0, 7),seq(30, 360, by = 30))
+
+# Calculate means of the covariates in the control phase
+# Takes one value per patient because all of the covariates should be the same
+# for each visit, the only difference is that for those with more than 2 visits
+# weight_dv will not be an average
+means_int <- ee_int %>%
+  arrange(Arb_PersonId, EncounterDate) %>%
+  select(
+    # Arb_PersonId,
+    N_months_post_id,
+    Phase:slope2, 
+    Weight_bl,
+    age_lt_45:year_at_ind3) %>%
+  group_by(N_months_post_id) %>%
+  # slice_head() %>%
+  # ungroup() %>%
+  # select(Phase:slope2, 
+  #        Weight_bl,
+  #        age_lt_45:year_at_ind3) %>%
+  summarise_all(list(mean)) %>%
+  ungroup()
+
+# Get the average weight values for each month after the index date
+means_dv_int <- ee_int %>%
+  select(Arb_PersonId, 
+         N_months_post_id, Weight_dv) %>%
+  group_by(N_months_post_id) %>%
+  summarise(Weight_dv = mean(Weight_dv))
+
+means_int %<>%
+  left_join(., means_dv_con, by = "N_months_post_id")
+
+avg_data_int %<>%
+  mutate(N_months_post_id = N_days_post_id/30) %>%
+  left_join(., means_int, by = "N_months_post_id") %>%
+  mutate(Phase = 1,
+         slope1 = 1,
+         slope2 = 0)
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+avg_data <- bind_rows(avg_data_con, avg_data_int)
+
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+predicted_vals <- predict(lmer_mod_bin, avg_data, re.form=NA, type="response")
+
+avg_data$predicted_vals <- predicted_vals
+
+predicted <- 
+  avg_data %>%
+  mutate(Avg_Weight_kgs = predicted_vals,
+         Type = "Predicted",
+         N_months_post_id = round(N_days_post_id/30)) %>%
+  select(N_months_post_id, Phase, Avg_Weight_kgs, Type)
+
+
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+bind_rows(observed, predicted) %>%
+  filter(N_months_post_id <= 18) %>%
+  mutate(Phase = case_match(Phase, 0 ~ "Control",
+                            1 ~ "Intervention")) %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~Phase) +
+  theme_minimal()
+```
+
+## Counter factual approach
+Begin by creating a dataframe where all rows are in the intervention phase only. Then, 
+```{r}
+# Stack the rows from the intervention, with rows from the intervention where
+# the Phase has been set to control
+exposed <- 
+  ee %>%
+  filter(slope1 == 1,
+         slope2 == 0)
+
+# Make predictions for exposed
+predicted_vals_ex <- data.frame(exposed = predict(lmer_mod, exposed, re.form=NA, type="response"))
+
+exposed <- bind_cols(exposed, predicted_vals_ex)
+
+# unexposed
+unexposed <- 
+  ee %>%
+  filter(slope1 == 1) %>%
+  mutate(slope1 = 0,
+         slope2 = 1)
+
+# Make predictions for exposed
+predicted_vals_un <- data.frame(unexposed = predict(lmer_mod, unexposed, re.form=NA, type="response"))
+
+# Bind rows
+count_fact_data <- 
+  bind_cols(exposed, predicted_vals_un) %>%
+  mutate(diff = exposed - unexposed) %>%
+  rename(observed = Weight_kgs)
+
+# Plot data
+# To plot the predicted and average values, first select the columns of interest,
+# then group data by Phase and the number of months after index visit,
+# then calculate means, drop the grouping, and recode the Phase values to be 
+# able to display a faceted plot.
+# Next, convert the data to long and plot 
+count_fact_long <- count_fact_data %>%  
+  select(Arb_PersonId, N_months_post_id, observed, exposed, unexposed, diff) %>%
+  group_by(Arb_PersonId, N_months_post_id) %>%
+  summarise(across(observed:diff, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
+  group_by(N_months_post_id) %>%
+  summarise(across(observed:diff, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
+
+  pivot_longer(cols = observed:diff, names_to = "Type", values_to = "Avg_Weight_kgs")
+  
+```
+
+
+```{r}
+count_fact_long %>%
+  filter(Type == "diff") %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~Type) +
+  theme_minimal()
+```
+
+
+```{r}
+count_fact_long %>%
+  filter(Type != "diff") %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal()
+
+```
+
+```{r}
+# What is the average of the baseline weight for each intervention phase
+ee %>%
+  group_by(Arb_PersonId, Phase) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(Weight_bl, Phase) %>%
+  mutate(Phase = ifelse(Phase == "0", "Control", "Intervention")) %>%
+  tbl_summary(by = Phase,
+              statistic = everything() ~ "{mean} ({sd})",
+              digits = everything() ~ c(2,2))
+```
+
+
+```{r}
+# Before predictions, subtract average difference in weight, make control group lighter a bit then do averaging to see the plot
+# How long have they been in the study? Time since index date, get last visit, to calculate time, then categorize,
+# Intensity of usage of health care based on how many visits, because people with more visits will dominate the data
+```
+
+# Subtract difference between the average weight in each phase
+```{r}
+# 1. Calculate the average difference between control and intervention
+avg_diff <- 
+  ee %>%
+  group_by(Phase) %>%
+  summarise(Avg_weight_dv = mean(Weight_dv)) %>%
+  pivot_wider(names_from = Phase, values_from = Avg_weight_dv) %>%
+  mutate(avg_diff = `0` - `1`) %>%
+  pull(avg_diff)
+
+# 2. Create a new data set using the avg_dff is subtracted from the control 
+avg_data_diff <- 
+  avg_data %>%
+  mutate(Weight_bl = ifelse(Phase == 0, (Weight_bl-avg_diff), Weight_bl))
+
+# 4. Calculate predicted values
+predicted <- predict(lmer_mod_bin, avg_data_diff, re.form=NA, type="response")
+
+
+# 5. Bind the predicted values to the data set
+avg_data_diff %<>%
+  bind_cols(., data.frame(predicted))
+
+avg_data_diff %>%
+  select(predicted_vals, predicted)
+
+
+# 5. Create a data set of the predicted values and categorical lmer data input
+avg_data_diff %<>%
+  mutate(Type = "Predicted",
+         Avg_Weight_kg = predicted,
+         N_months_post_id = N_days_post_id / 30) %>%
+  select(N_months_post_id, Phase, Avg_Weight_kgs, Type)
+
+# Plot data
+# To plot the predicted and average values, first select the columns of interest,
+# then group data by Phase and the number of months after index visit,
+# then calculate means, drop the grouping, and recode the Phase values to be 
+# able to display a faceted plot.
+# Next, convert the data to long and plot 
+bind_rows(observed, avg_data_diff) %>%
+  
+  mutate(Phase = case_match(Phase, 0 ~ "Control",
+                            1 ~ "Intervention")) %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~Phase) +
+  theme_minimal()
+
+
+```
+
+# Add the number of visits per patient into the model
+```{r}
+# Get the number of visits in each phase as a measure of intensity
+intensity <- visits_per_pt %>%
+  mutate(Phase = Intervention,
+         Phase = ifelse(Intervention == "Control", 0, 1)) %>%
+  select(-Intervention) %>%
+  mutate(across(c(n_visits_per_pt), ~ factor(.))) %>%
+  mutate(n_visits_per_pt = fct_collapse(n_visits_per_pt,
+                                        `1` = 1,
+                                        `2-3` = c(2, 3),
+                                        `4-5` = c(4, 5),
+                                        `6+` = c(visits_per_pt %>% filter(n_visits_per_pt >= 6) %>% distinct(n_visits_per_pt) %>% pull(n_visits_per_pt)))) %>%
+  rename(intensity = n_visits_per_pt)
+  
+
+# Create a new data frame from ee with the intensity value
+lmer_cat_data <- 
+  ee %>%
+  left_join(., intensity, by = c("Arb_PersonId", "Phase"))
+
+
+# LMER clustered on department external name and patient id
+lmer_mod <- lmer(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + slope1 +
+          # 1 - Intervention group
+          slope1:N_days_post_id:intensity + slope1:N_days_post_180:intensity + 
+          
+          # 2 - Control group
+          slope2:N_days_post_id:intensity + slope2:N_days_post_180:intensity + 
+          
+          # Random effects, dept name causes convergence warnings   
+          # (1| DepartmentExternalName) + (1| Arb_PersonId),
+          (1|Arb_PersonId),
+                
+          # Input data frame
+          data=lmer_cat_data)
+
+#  
+broom.mixed::tidy(lmer_mod)
+
+
+predicted <- predict(lmer_mod, lmer_cat_data, re.form=NA, type="response")
+
+# Create a data set of the predicted values and categorical lmer data input
+lmer_cat_data <- bind_cols(lmer_cat_data, data.frame(predicted)) %>%
+  mutate(observed = Weight_dv)
+
+# Plot data
+# To plot the predicted and average values, first select the columns of interest,
+# then group data by Phase and the number of months after index visit,
+# then calculate means, drop the grouping, and recode the Phase values to be 
+# able to display a faceted plot.
+# Next, convert the data to long and plot 
+lmer_cat_data %>%  
+  select(Phase, N_months_post_id, observed, predicted) %>%
+  group_by(Phase, N_months_post_id) %>%
+  summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
+  mutate(Phase = case_match(Phase, 0 ~ "Control",
+                            1 ~ "Intervention")) %>%
+  pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~Phase) +
+  theme_minimal()
+
+```
+```{r}
+# create an example data set
+lmer_cat_data %>%
+  filter(Phase == 0) %>%
+  group_by(Arb_PersonId) %>%
+  count() %>%
+  ungroup() %>%
+  filter(n > 3)
+
+lmer_cat_data %>%
+  filter(Arb_PersonId == 25240011, Phase == 0) %>%
+  mutate(Phase = ifelse(Phase == 0, "Control", "Intervention")) %>%  
+  ggplot(., aes(x = N_days_post_id, y = Weight_dv)) +
+  geom_line() +
+  geom_point() +
+  geom_smooth(method = lm) +
+  facet_wrap(~Phase) 
+```
+
+```{r}
+# degree = 0 works
+# degree = 1 fails to converge
+lmer_mod_bin <- lmer(Weight_dv ~ bSpline(N_days_post_id, knots = c(180), degree = 1) + 
+                       Weight_bl + Phase +
+                       Phase:N_days_post_id +
+          
+                   
+          # Clustering, convergence issues with both dept and personid   
+          # (1| DepartmentExternalName) + (1| Arb_PersonId),
+          ( bSpline(N_days_post_id, knots = c(180), degree = 1)| Arb_PersonId),
+                
+          # Input data frame
+          data=ee_bin
+          )
+
+predict()
+```
+

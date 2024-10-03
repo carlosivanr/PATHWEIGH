@@ -66,9 +66,10 @@ if (file.exists(data_file)) {
   # If the file does not exist, capture labs/procedures, eoss, and comorbidities
   # Set the future plan and options to exceed default memory limits
   plan(multisession, workers = 4)
-
+  
+  # Set the max globals size to 10 GB
   options(future.rng.onMisuse = "ignore",
-          future.globals.maxSize = (8 * 1024^3))
+          future.globals.maxSize = (10 * 1024^3))
 
   # PROC LABS MEDS PROCEDURES --------------------------------------------------
   source(str_c(emr_dir, "subscripts/proc_labs_meds.R"))
