@@ -23,7 +23,8 @@
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-# Set data_file to the processed ee_ene data.
+# Set data_file to the processed ee_ene data which contains all of the 
+# labs procedures, comorbidities, etc. if already processed.
 data_file <- here(
                   str_c("delivery_", data_delivery_date),
                   "data",

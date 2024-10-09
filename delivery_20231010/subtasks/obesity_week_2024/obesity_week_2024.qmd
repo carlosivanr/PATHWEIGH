@@ -11,6 +11,8 @@ format:
     reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
     
 editor: source
+execute: 
+  echo: true
 ---
 
 ```{r, load packages}
@@ -289,26 +291,58 @@ slopes <-
 ```{r}
 # Create a wide data frame with the 0-6m slope and 6-18m slope as separate cols
 # estimate refers to 0-6m and post_180 is the 6-18m slope
-slopes <- left_join(
-  # Get the first interaction slope
-(slopes %>%
-  mutate(group = c("Con", "Con", "Int", "Int")) %>%
-  group_by(group) %>%
-  slice_head() %>%
+# left_join(
+#   # Get the first interaction slope
+# (slopes %>%
+#   mutate(group = c("Con", "Con", "Int", "Int")) %>%
+#   group_by(group) %>%
+#   slice_head() %>%
+#   ungroup() %>%
+#   mutate(estimate = ifelse(term == "Phase:N_months_post_id", sum(estimate), estimate))),
+#   # Get the estimates for 6-18m slope, by summing within interaction group
+# (slopes %>%
+#   mutate(group = c("Con", "Con", "Int", "Int")) %>%
+#   group_by(group) %>%
+#   summarise(post_180_estimate = sum(estimate))),
+# by = "group"
+#  ) 
+
+slopes <-
+# Control slopes
+bind_rows(
+  slopes %>%
+    filter(str_detect(term, "^N_months")) %>%
+    mutate(estimate = ifelse(term == "N_months_post_180", sum(estimate), estimate),
+          group = "Con",
+          time = c("slope1", "slope2")), 
+
+  # Intervention 1st 6mo
+  slopes %>%
+    filter(str_detect(term, "post_id")) %>%
+    summarise(estimate = sum(estimate)) %>%
+    mutate(group = "Int",
+          time = "slope1"),
+
+  slopes %>%
+    summarise(estimate = sum(estimate)) %>%
+    mutate(group = "Int",
+          time = "slope2")
+) %>%
+  select(-term) %>%
+  group_by("group") %>%
+  pivot_wider(values_from = estimate, names_from = time) %>%
   ungroup() %>%
-  mutate(estimate = ifelse(term == "Phase:N_months_post_id", sum(estimate), estimate))),
-  # Get the estimates for 6-18m slope, by summing within interaction group
-(slopes %>%
-  mutate(group = c("Con", "Con", "Int", "Int")) %>%
-  group_by(group) %>%
-  summarise(post_180_estimate = sum(estimate))),
-by = "group"
- ) 
+  select(-`"group"`) %>%
+  mutate(term = c("N_months_post_id", "Phase:N_months_post_id"),
+         estimate = slope1,
+         post_180_estimate = slope2) %>%
+  select(term, estimate, group, post_180_estimate)
+
 ```
 
 ## Figure: Observed weight by month in each phase with regression lines
 ```{r}
-# Create figure of observed vs predicted values
+## Create figure of observed vs predicted values
 predicted <- predict(lmer_mod_bin, ene, re.form=NA, type="response")
 
 obs_pred <- bind_cols(ene, data.frame(predicted)) %>%
@@ -328,7 +362,7 @@ pan_a <- obs_pred  %>%
   ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs)) +
   # geom_point() +
   geom_line() +
-  facet_wrap(~Intervention) +
+  facet_wrap(~Intervention, nrow = 1) +
   theme_minimal() +
   scale_x_continuous(breaks = seq(0,18,3)) #+
   # ylim(ylims)
@@ -338,7 +372,6 @@ pan_a <- obs_pred  %>%
 # Create the overlay data by averaging across all visits in each phase of the
 # modeling data frame. Represents the non-index/followup visits. Since covariates
 # are time invarying within phase, it's not necessary to capture the index visit
-
 overlay_data <- 
 ene %>%
   select(age_lt_45, age_45_to_60, age_gt_60, sex_m,
@@ -392,9 +425,41 @@ pan_a +
               size = 2)
 ```
 
-# Slide 2
-## Overall EE vs ENE
+## Comparison of subsequent 12 month slope in control vs intervention via linear contrast
 ```{r}
+dim(coef(summary(lmer_mod_bin)))
+length(c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,-1,-1,1,1))
+lmerTest::contest(lmer_mod_bin, c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,-1,-1,1,1))
+```
+
+# Slide 2
+```{r}
+# Version 2. Eligible and Enrolled Control vs Intervention
+ee <- mod_data %>%
+  filter(EE == 1) %>%
+  group_by(Arb_PersonId, Phase) %>%
+  slice_head() %>%
+  ungroup()
+```
+
+```{r}
+# Version 2. ENE Control vs Intervention
+ee %>%
+  select(Intervention, Age, Sex, Race_Ethnicity, 
+             Weight_bl, Weight_dv, BMI) %>%
+  tbl_summary(by = Intervention,
+              statistic = list(all_continuous() ~ "{mean} ({sd})")) %>%
+  add_p(test = list(Age ~ "t.test",
+                    Weight_bl ~ "t.test",
+                    Weight_dv ~ "t.test",
+                    BMI ~ "t.test"),
+        test.args = all_tests("t.test") ~ list(var.equal = TRUE))
+```
+
+
+```{r}
+#| eval: false
+# Version 1. Overall EE vs ENE
 c(0, 1) %>%
   map_df(
     ~ mod_data %>%
@@ -408,7 +473,7 @@ c(0, 1) %>%
     ) %>%
   tbl_summary(by = EE, 
                 statistic = list(all_continuous() ~ "{mean} ({sd})")) %>%
-  add_p() %>%
-  as_gt()
+  add_p()
 ```
+
 

@@ -12,10 +12,20 @@
 labs_procedures_sot <- function(temp){
   tic()
   
+  walk(
+    .x  = c("procedure", "labs", "flowsheets", "referrals"),
+    .f = read_pw_csv
+  )
+
+  
   # Check that all the required data frames are loaded in the workspace.
   dfs <- c("procedure", "labs", "flowsheets", "referrals")  
-  if (sum(map_lgl(dfs, exists)) != length(dfs)){
-    stop("Not all required data frames are loaded into the workspace. Check that procedure, labs, screener, and referrals are in properly named.")
+  if (sum(map_lgl(dfs, exists)) != length(dfs)) {
+    walk(
+      .x  = c("procedure", "labs", "flowsheets", "referrals"),
+      .f = read_pw_csv
+    )
+    # stop("Not all required data frames are loaded into the workspace. Check that procedure, labs, screener, and referrals are in properly named.")
     }
     
   # distinct_pts_x_ind, needed downstream for procedures
@@ -30,7 +40,7 @@ labs_procedures_sot <- function(temp){
   # had already been implemented. The if statement test can be expanded to 
   # include screeners, bariatric, and/or referrals columns. Currently used as 
   # a general test for all of the above columns.
-  if (sum(grepl("O2CPAPBIPAP", names(temp))) == 0){
+  if (sum(grepl("O2CPAPBIPAP", names(temp))) == 0) {
     
     # Procedures (O2, CPAP, BIPAP) ---------------------------------------------
     # Create a data frame where procedures are joined with distinct_pts_x_ind by patient ID,

@@ -18,7 +18,7 @@
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # create_safety_officer_table <- function(data, date_1, date_2){ #older version of the function
-create_safety_officer_table <- function(data, date_1 = NULL, date_2){
+create_safety_officer_table <- function(data, date_1 = NULL, date_2) {
   # Set date_1 to be 1 year prior to the input date
   date_1 <- date_max - 365
   
@@ -44,7 +44,7 @@ create_safety_officer_table <- function(data, date_1 = NULL, date_2){
     
     # Determine which algorithm to use for subsetting data, currently both are
     # the same.
-    if(date_max >=  lubridate::ymd("20231010")){
+    if (date_max >=  lubridate::ymd("20231010")) {
       
       # This is the original version of the sot data creation algorithm
       # kept here until modifications are determined
@@ -86,7 +86,7 @@ create_safety_officer_table <- function(data, date_1 = NULL, date_2){
     
     # If the max date is greater than or equal to 2024-03-26 then capture the
     # control level data from the previous year available for control
-    if(date_max >=  lubridate::ymd("20240326")){
+    if (date_max >=  lubridate::ymd("20240326")) {
       # The previously available comparison one-year-period for control was from
       # 2022-03-17 through 2023-03-16
       ctrl_comparison <- 
@@ -142,9 +142,10 @@ create_safety_officer_table <- function(data, date_1 = NULL, date_2){
     # relative to the root project directory, then reverts back, to import the
     # appropriate data
     setwd(here())
-    setwd(str_c("../../../PATHWEIGH_DATA_SECURE/", data_delivery_date))
+    # setwd(str_c("../../../PATHWEIGH_DATA_SECURE/", data_delivery_date))
+    setwd(str_c("D:/PATHWEIGH/data_raw/", data_delivery_date))
     file <- dir()[grepl("Admission", dir())] #Search for a file with "admission" in the name
-    admissions <- fread(file,
+    admissions <- data.table::fread(file,
                         header = TRUE, 
                         integer64 = "numeric", 
                         na.strings = c("", "NA"))

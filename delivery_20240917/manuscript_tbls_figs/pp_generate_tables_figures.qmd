@@ -5,7 +5,7 @@ format:
     reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
 
 params:
-  delivery: 20240326
+  delivery: "20240917"
 
 execute: 
   echo: false
@@ -183,6 +183,7 @@ visits_post_id %<>%
 2. Change font (once all tables/figs are finalized)
 
 # Total sample
+Data is restricted to those that had 2 or more visits in both control and intervention phases of the study from data delivery 2024-09-17.Enrollment cut off date of 2024-03-15.
 ```{r}
 pp_mod_data %>%
   group_by(Arb_PersonId, Intervention) %>%
@@ -295,6 +296,7 @@ tab2a <- wpv_data %>%
              WPV_vtype = ifelse(WPV_IP == 1 | WPV_TH == 1, 1, 0), # Combine WPV_IP and WPV_TH
              Intervention.factor = factor(Intervention.factor, levels = c("Control", "Intervention"))) %>%
       mutate(WPV_WMQ = ifelse(WPV_WMQ == 1 | WPV_PW_flow == 1, 1, 0)) %>%
+      mutate(WPV_OBHPI = factor(WPV_OBHPI, levels = c("0", "1"))) %>%
       select(Intervention.factor,
              WPV_ICD,
              WPV_CC,
@@ -309,6 +311,7 @@ tab2a <- wpv_data %>%
                                WPV_WMQ ~ "Weight management questionnaire",
                                WPV_vtype ~ "PW Visit Type",
                                WPV_smart ~ "PATHWEIGH Smart Set"),
+                  value = list(WPV_OBHPI ~ "1"),
                   missing = "no",
                   digits = everything() ~ c(0,1))
     )
@@ -373,8 +376,9 @@ clinic_engagement %<>%
 
 # Get the Cohort values to join in to clinic engagement for grouping
 cohort_vals <- visits_post_id %>%
-  select(DepartmentEpicId, Cohort) %>%
+  select(DepartmentEpicId, GroupID) %>%
   distinct() %>%
+  rename(Cohort = GroupID) %>%
   filter(DepartmentEpicId %in% clinic_engagement$DepartmentEpicId)
 
 # Join cohort values
@@ -411,14 +415,11 @@ hist %>%
   theme_minimal() +
   ylab("Percentage of clinics within cohort") +
   scale_fill_brewer(palette="Set2")
-
 ```
 Caption: Engagement scores defined as the sum (0 -8) of a binary indicator of several measures of engagement. Measures of engagement include 1) Zoom intro meeting, 2) In-person clinic visit from a member of the PATHWEIGH team, 3) Requested support from PATHWEIGH clinical team, 4) Used PATHWEIGH e-Learning module, 5) WOF training, 6) use of PATHWEIGH Placard, 7) Attended learning community, 8) Chose practice champion.
 
 # ITT model
 ```{r}
-
-
 # Redefine slope 1 and slope 2
 pp_mod_data %<>%
   mutate(slope1 = ifelse(Intervention == "Control", 1, 0),
@@ -509,17 +510,17 @@ slopes <-
 # estimate refers to 0-6m and post_180 is the 6-18m slope
 slopes <- left_join(
   # Get the first interaction slope
-(slopes %>%
-  mutate(group = c("Con", "Con", "Int", "Int")) %>%
-  group_by(group) %>%
-  slice_head() %>%
-  ungroup()),
-  # Get the estimates for 6-18m slope, by summing within interaction group
-(slopes %>%
-  mutate(group = c("Con", "Con", "Int", "Int")) %>%
-  group_by(group) %>%
-  summarise(post_180_estimate = sum(estimate))),
-by = "group"
+  (slopes %>%
+    mutate(group = c("Con", "Con", "Int", "Int")) %>%
+    group_by(group) %>%
+    slice_head() %>%
+    ungroup()),
+    # Get the estimates for 6-18m slope, by summing within interaction group
+  (slopes %>%
+    mutate(group = c("Con", "Con", "Int", "Int")) %>%
+    group_by(group) %>%
+    summarise(post_180_estimate = sum(estimate))),
+  by = "group"
  ) 
 ```
 
@@ -761,6 +762,7 @@ tab %>%
 ```
 
 ### All panels display predicted values from 4-slope model
+Compares two groups in both phases. nPW group never received any of the PATHWEIGH tools during any of their intervention visits. The PW group received at least one PATHWEIGH tool in at least one visit during the intervention phase.
 ```{r, fig.height = 6, fig.width=6.5, fig.dpi = 600}
 # 3-line plot of the per-protocol model
 pan_b <- obs_pred %>%
@@ -844,6 +846,8 @@ overlay_data %<>%
 
 ```{r}
 # Slopes data captured upstream in Table: Model Output section
+# The Avg_Weight_kgs values of 104;110 are used as x-y coordinates to place the
+# element text to display the slopes
 slopes %<>%
   mutate(lab = str_c("Rate of change\n0-6mo: ", estimate, " kg/month\n6-18mo: ", post_180_estimate, " kg/month")) %>%
   mutate(Avg_Weight_kgs = ifelse(group == "Con_nPW", 104, NA),
@@ -981,7 +985,6 @@ broom.mixed::tidy(
   as_tibble() %>%
   mutate_if(is.numeric, ~round(., 3)) %>%
   gt::gt()
-
 ```
 
 ### Triglycerides ~ Visit:Intervention.factor + Visit:(1-Intervention.factor) + Intervention.factor + (1| Arb_PersonId)
@@ -1035,6 +1038,7 @@ visits_post_id %>%
   summarise_all(list(sum)) %>%
   pivot_longer(., cols = everything(), names_to = "comorbidity", values_to = "n") %>%
   arrange(desc(n)) %>%
+  filter(n > 1) %>%
   pull(comorbidity)
 ```
 
@@ -1047,7 +1051,8 @@ c("Control", "Intervention") %>%
       filter(IndexVisit == 1,
               Intervention.factor == .x) %>%
       select(all_of(ordered_comorbidity_names), Intervention.factor) %>%
-      mutate(Intervention.factor = factor(Intervention.factor, levels= c("Control", "Intervention")))
+      mutate(Intervention.factor = factor(Intervention.factor, levels = c("Control", "Intervention")))
+      # mutate(across(all_of(ordered_comorbidity_names), ~ factor(., levels = c("0", "1"))))
   ) %>%
   tbl_summary(by = "Intervention.factor",
               digits = everything() ~ 1) %>%

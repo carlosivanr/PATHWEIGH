@@ -179,8 +179,13 @@ proc_comorbidities <- function(data){
   # Reorder comorbidity names
   comorbidity_names <- comorbidity_names[index]
   
-  # Assign comorbidity names, back to the global environment
-  comorbidity_names <<- comorbidity_names 
+  # Save comorbidity names to data directory and assign to global environment
+  comorbidity_names <<- comorbidity_names
+  saveRDS(comorbidity_names, 
+          file = here(proj_root_dir, 
+                      "data", 
+                      str_c("comorbidity_names_", data_delivery_date, ".RDS")))
+  
   
   # Rearrange the columns so that the cormorbidities are ordered from most 
   # frequently observed comorbidities that are observed at least 2x within the 2

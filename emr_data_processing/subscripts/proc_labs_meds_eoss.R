@@ -96,7 +96,6 @@ proc_labs_meds_eoss <- function(data){
 
     temp <- labs_procedures(temp)
     temp <- capture_medications(temp)
-    # temp <- eoss(temp)
     return(temp)
   }
 

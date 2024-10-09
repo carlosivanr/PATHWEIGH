@@ -280,7 +280,7 @@ ee_ene %<>%
   mutate(EE = ifelse(Arb_PersonId %in% ee_ids, 1, 0))
 
 
-# Cut off index date at 03/16/2024. No one after index date 3/16/2024 should be 
+# Cutoff index date at 03/16/2024. No one after index date 3/16/2024 should be 
 # enrolled.
 if (data_delivery_date == 20240917) {
   # Get the ids that are enrolled past the cut off
@@ -323,9 +323,10 @@ create_enrollment_table(visits_post_id)
 
 # *** requires processed labs, procedures, and comorbidities
 # *** Currently uses visits post id, but it may be worth using mod_data
-if (data.frame(grep("O2CPAPBIPAP", (names(visits_post_id)))) %>% nrow() > 0) {
-  create_safety_officer_table(visits_post_id, date_2 = date_min)
-}
+# *** Currently not working
+# if (data.frame(grep("O2CPAPBIPAP", (names(visits_post_id)))) %>% nrow() > 0) {
+#   create_safety_officer_table(visits_post_id, date_2 = date_max)
+# }
 
 # Make mod_data ----------------------------------------------------------------
 # Create a data frame for the primary aim statistical models. Automatically
