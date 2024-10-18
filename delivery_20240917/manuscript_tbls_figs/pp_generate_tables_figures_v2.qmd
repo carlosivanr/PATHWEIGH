@@ -66,9 +66,11 @@ prep_mdl_out <- function(model_output) {
     # convert the estimate for N_days_* to N_months_*
     mutate(estimate = ifelse(grepl("N_days_post", term), estimate * 30, estimate)) %>%
     mutate(std.error = ifelse(grepl("N_days_post", term), std.error * 30, std.error)) %>%
+    mutate(conf.low = ifelse(grepl("N_days_post", term), conf.low * 30, conf.low)) %>%
+    mutate(conf.high = ifelse(grepl("N_days_post", term), conf.high * 30, conf.high)) %>%
   
     # round values
-    mutate(across(estimate:p.value, ~round(., 3))) %>%
+    mutate(across(estimate:conf.high, ~round(., 3))) %>%
   
     # convert term N_days_* to N_months_* and slope* to human readable
     mutate(term = str_replace(term, "N_days_post_id", "N_months_post_id"),
@@ -196,7 +198,6 @@ pp_mod_data %>%
   as_gt()
 ```
 
-
 # Table: Health metrics at index and last visits
 ```{r}
 tab1 <- bind_rows(
@@ -223,11 +224,12 @@ tab1 <- bind_rows(
                   type = list(c(PHQ2, PHQ9, GAD7) ~ 'continuous'),
                   # statistic = list(all_continuous() ~ c("{mean} ({sd}; {min}; {max})")),
                   statistic = list(all_continuous() ~ c("{mean} ({sd})")),
-                  label = list(Race_Ethnicity ~ "Race/Ethnicity",
-                                  BMI ~ "BMI (kg/m^2)",
-                                  Systolic_blood_pressure ~ "Systolic BP (mmHg)",
-                                  Diastolic_blood_pressure ~ "Diastolic BP (mmHg)",
-                                  Smoking_Status ~ "Smoking Status"),
+                  label = list(Age ~ "Age (years)",
+                               Race_Ethnicity ~ "Race/Ethnicity",
+                               BMI ~ "BMI (kg/m^2)",
+                               Systolic_blood_pressure ~ "Systolic BP (mmHg)",
+                               Diastolic_blood_pressure ~ "Diastolic BP (mmHg)",
+                               Smoking_Status ~ "Smoking Status"),
                   digits = list(all_categorical() ~ c(0,1),
                                   all_continuous() ~ c(1,1)))
         )
@@ -533,7 +535,7 @@ tab %>%
   fmt_tab(., "ITT Model")
 ```
 
-# Figure: Model figure
+## Figure: Model figure
 ```{r}
 # Create figure of observed vs predicted values
 obs_pred <- 
@@ -548,6 +550,7 @@ obs_pred <-
 ```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
 ylims <- c(100, 113)
 
+# *** pan_a may be obsolete in version 2
 pan_a <- obs_pred  %>%
   group_by(Intervention, N_months_post_id) %>%
   summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
@@ -580,7 +583,10 @@ pp_mod_data %>%
   slice(rep(1:n(), each = 3)) %>%
   mutate(N_days_post_id = rep(c(0,180,540), 2)) %>%
   mutate(N_days_post_180 = rep(c(0,0,360),2))
+```
 
+
+```{r, message = FALSE}
 # Convert to regular data frame
 # overlay_data <- data.frame(overlay_data)
 
@@ -602,44 +608,67 @@ pp_mod_data %>%
 # Code from Dean Marchiori
 # https://www.deanmarchiori.com/posts/2023-02-06-prediction-intervals-for-linear-mixed-effects-models/
 
-predfn <- function(.) {
-  predict(., newdata=new, re.form=NA)
-}
+# Set whether or not to run the boot strap
+run_boot = FALSE
 
-# summarise output of bootstrapping
-sumBoot <- function(merBoot) {
-  return(
-    data.frame(fit = apply(merBoot$t, 2, function(x) as.numeric(quantile(x, probs=.5, na.rm=TRUE))),
-               lwr = apply(merBoot$t, 2, function(x) as.numeric(quantile(x, probs=.025, na.rm=TRUE))),
-               upr = apply(merBoot$t, 2, function(x) as.numeric(quantile(x, probs=.975, na.rm=TRUE)))
+if (run_boot == TRUE) {
+  
+  predfn <- function(.) {
+    predict(., newdata=new, re.form=NA)
+    }
+
+  # summarise output of bootstrapping
+  sumBoot <- function(merBoot) {
+    return(
+      data.frame(fit = apply(merBoot$t, 2, function(x) as.numeric(quantile(x, probs=.5, na.rm=TRUE))),
+                 lwr = apply(merBoot$t, 2, function(x) as.numeric(quantile(x, probs=.025, na.rm=TRUE))),
+                 upr = apply(merBoot$t, 2, function(x) as.numeric(quantile(x, probs=.975, na.rm=TRUE)))
+      )
     )
-  )
+  }
+  
+  # 'new' data because predfn requires the input to be named "new"
+  new <- overlay_data
+
+  # Save bootstrap products a bootMer object
+  tictoc::tic()
+  boot <- lme4::bootMer(lmer_mod_bin, predfn, nsim=1000, use.u=TRUE, type="parametric")
+  tictoc::toc()
+
+  # Apply the sumBoot function on the bootMerObject
+  intervals <- sumBoot(boot)
+  
+  # Save boot strap output to not have to run it every single time we want a 
+  # report
+  write_csv(intervals,
+            here::here(str_c("delivery_", delivery), 
+                       "manuscript_tbls_figs/bootMer_intervals_itt.csv")
+            )
+  
+} else {
+  
+  # Load the intervals file 
+  intervals = read_csv(here::here(str_c("delivery_", delivery), 
+                       "manuscript_tbls_figs/bootMer_intervals_itt.csv"))
 }
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+```
 
-# 'new' data because predfn requires the input to be named "new"
-new <- overlay_data
 
-# Save bootstrap products a bootMer object
-boot <- lme4::bootMer(lmer_mod_bin, predfn, nsim=1000, use.u=TRUE, type="parametric")
-
-# Apply the sumBoot function on the bootMerObject
-intervals <- sumBoot(boot)
-
+```{r}
 # Merge in the lwr and upr intervals to overlay_data
 overlay_data <- bind_cols(
   overlay_data,
   # intervals %>% select(-fit) # Does not use the fit values
-  intervals
-)
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  intervals)
 
 # Create a second data frame with the column names matching those required
 # by original plot
-overlay_data %<>%
-  # select(N_days_post_id, predicted, lwr, upr, slope1) %>%
+overlay_data <- overlay_data %>%
   select(N_days_post_id, fit, lwr, upr, slope1) %>%
-  # pivot_longer(cols = predicted:upr, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
-  pivot_longer(cols = fit:upr, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
+  pivot_longer(cols = fit:upr, 
+               names_to = "Type", 
+               values_to = "Avg_Weight_kgs") %>%
   rename(N_months_post_id = N_days_post_id) %>%
   mutate(Intervention = ifelse(slope1 == 1, "Control", "Intervention")) %>%
   mutate(N_months_post_id = ifelse(N_months_post_id == 180, 6, 
@@ -657,18 +686,23 @@ slopes %<>%
 ```
 
 ```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
+#| eval: false
 # Plot of the 1st draft of the model plot with lines serving as indicators for 
 # the upper an dlower prediction intervals.
+# *** May become obsolete in version 2
 pan_a +
   # geom_line(data = overlay_data %>% filter(Type == "predicted"), color = "blue") +
   geom_line(data = overlay_data %>% filter(Type == "fit"), color = "blue") +
-  geom_line(data = overlay_data %>% filter(Type == "lwr"), color = "red", linetype = "dotted") +
-  geom_line(data = overlay_data %>% filter(Type == "upr"), color = "red", linetype = "dotted")
+  geom_line(data = overlay_data %>% filter(Type == "lwr"), 
+            color = "red", linetype = "dotted") +
+  geom_line(data = overlay_data %>% filter(Type == "upr"), 
+            color = "red", linetype = "dotted")
 ```
+
 ```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
 # Plot of the 2nd draft. Instead of superimposing geom_ribbon(), this version
 # superimposes geom_line() of the observed values
-observed <- obs_pred  %>%
+observed <- obs_pred %>%
   group_by(Intervention, N_months_post_id) %>%
   summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
   pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
@@ -676,19 +710,28 @@ observed <- obs_pred  %>%
   mutate(fit = Avg_Weight_kgs) %>%
   select(-Type, Avg_Weight_kgs)
 
+# fit refers to the predicted values at 0, 6, and 18 months
+# lwr refers to the lower bound of the fit values
+# upr refers to the upper bound of the fit values
 overlay_data %>%
   group_by(Intervention, N_months_post_id) %>%
   pivot_wider(names_from = Type, values_from = Avg_Weight_kgs) %>%
   ggplot(., aes(x = N_months_post_id, y = fit)) +
   geom_line(aes(N_months_post_id, fit), color = "blue") +
   geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "red", alpha = 0.1, show.legend = FALSE) +
-  facet_grid(~Intervention) +
+  facet_grid(~ Intervention) +
   geom_line(data = observed, color = "black") +
   theme_minimal() +
   scale_x_continuous(breaks = seq(0,18,3)) +
   ylim(ylims) +
   ylab("Average weight (kgs)") +
-  xlab("Months after index visit")
+  xlab("Months after index visit") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_Weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2)
 ```
 
 ```{r}
@@ -710,6 +753,7 @@ overlay_data %>%
 
 # 4-slopes model
 ```{r}
+# V1 Code
 # Redefine slope 1, slope 2, slope 3 in pp_mod_data to model three groups
 # Slope 1 is control no pw
 # Slope 2 is control w pw
@@ -727,7 +771,10 @@ pp_mod_data %<>%
          slope3 = ifelse(pw_pat == 0 & Intervention == "Intervention", 1, 0),
          slope4 = ifelse(pw_pat == 1 & Intervention == "Intervention", 1, 0),
          )
+```
 
+
+```{r}
 # pw is a visit indicator
 # need PW as a patient indicator
 pp_mod_data %>%
@@ -739,27 +786,8 @@ pp_mod_data %>%
   as_gt()
 ```
 
-
 ```{r}
-# mean(pp_mod_data$slope1)
-# 
-# mean(pp_mod_data$slope2)
-# 
-# mean(pp_mod_data$slope3)
-# 
-# mean(pp_mod_data$slope4)
-# 
-# pp_mod_data %>% 
-#   summarise(across(slope1:slope4, ~ mean(.x, na.rm = TRUE)))
-# 
-# 
-# pp_mod_data %>% 
-#   select(slope1:slope4) %>%
-#   summarise_all(list(mean = mean))
-
-```
-
-```{r}
+# V1 Code
 # 4 Slopes Model
 # PP model with patients that have both control and intervention visits
 # Linear mixed model with binary variables
@@ -801,6 +829,7 @@ lmer_mod_bin4 <- lmerTest::lmer(Weight_dv ~
 ```
 
 ```{r}
+# V1 Code
 # Create figure of observed vs predicted values
 predicted <- predict(lmer_mod_bin4, pp_mod_data, re.form=NA, type="response")
 
@@ -810,10 +839,15 @@ obs_pred <- bind_cols(pp_mod_data, data.frame(predicted)) %>%
 
 # Table: Model Output
 ```{r}
-model_output <- broom.mixed::tidy(lmer_mod_bin4)
+# V2 Code, adds confidence intervals for parameter estimates
+model_output <- broom.mixed::tidy(lmer_mod_bin4,
+                                  effects = "fixed",
+                                  conf.int = TRUE
+                                  )
 ```
 
 ```{r}
+# V1 Code
 # Prep the model output
 tab <- prep_mdl_out(model_output)
 
@@ -827,6 +861,7 @@ tab %<>%
 ```
 
 ```{r}
+# V1 Code
 # Grab slopes in the output table before converting to gt table
 slopes <- tab %>%
   filter(grepl(":", term)) %>%
@@ -848,14 +883,17 @@ by = "group"
 ```
 
 ```{r}
+# V1 Code
 # Add grouping rows for the following terms
 tab %>%
   fmt_tab(., "4-Slope Model")
 ```
 
-### All panels display predicted values from 4-slope model
+### Figure: All panels display predicted values from 4-slope model
 Compares two groups in both phases. nPW group never received any of the PATHWEIGH tools during any of their intervention visits. The PW group received at least one PATHWEIGH tool in at least one visit during the intervention phase.
+
 ```{r, fig.height = 6, fig.width=6.5, fig.dpi = 600}
+# V1 Code
 # 3-line plot of the per-protocol model
 pan_b <- obs_pred %>%
   mutate(group = ifelse(slope1 == 1, "Con_nPW", NA),
@@ -876,6 +914,7 @@ pan_b <- obs_pred %>%
 ```
 
 ```{r}
+# V1 Code
 # Create the overlay data by averaging across all visits in each phase of the
 # modeling data frame. Represents the non-index/followup visits. Since covariates
 # are time invarying within phase, it's not necessary to capture the index visit
@@ -899,6 +938,7 @@ pp_mod_data %>%
 ```
 
 ```{r}
+# V1 Code
 # Model predictions are done with N_days_post_* not N_months
 # duplicate rows to make predictions as 0, 6, and 18 months
 # Average visit in each phase at three different timepoints
@@ -951,6 +991,7 @@ slopes %<>%
 
 
 ```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
+#| eval: false
 pan_b +
   geom_line(data = overlay_data, color = "blue") +
   geom_text(data = slopes, 
@@ -960,44 +1001,124 @@ pan_b +
                 hjust = "left"),
                 size = 2)
 ```
-
-```{r, fig.height= 10, fig.width=6.5, dpi = 600}
-# Tried to arrange sub plot into one figure, but the scaling on each
-# plot panel is different
-# ggpubr::ggarrange(
-#   pan_a, pan_b,
-#   common.legend = TRUE,
-#   ncol = 1,
-#   nrow = 2,
-#   labels = c("A", "B")
-# )
+<!-- # ------------REGION BEGIN --------------- -->
+```{r}
+# Create a new overlay data frame to begin with
+overlay_data <-
+pp_mod_data %>%
+  mutate(group = ifelse(slope1 == 1, "Con_nPW", NA),
+         group = ifelse(slope2 == 1, "Con_PW", group),
+         group = ifelse(slope3 == 1, "Int_nPW", group),
+         group = ifelse(slope4 == 1, "Int_PW", group)) %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3,
+       Weight_bl, slope1, slope2, slope3, slope4,
+       N_days_post_id, N_days_post_180, group,
+       pw_pat, Phase) %>%
+  group_by(group) %>%
+  summarise_all(mean, .groups = "drop") %>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_days_post_id = rep(c(0,180,540), 4)) %>%
+  mutate(N_days_post_180 = rep(c(0,0,360),4))
 ```
 
-```{r, fig.width=6.5, eval=FALSE, echo = FALSE}
-# 4-line plot of PW and nPW in intervention and control groups
-# pw_ids <-
-#   pp_data %>%
-#   mutate(PW_Visit = if_else(WPV_WMQ == 1 | WPV_PW_flow ==1 | WPV_IP == 1 | WPV_TH == 1 | WPV_smart == 1, 1, 0)) %>%
-#   filter(PW_Visit == 1) %>%
-#   distinct(Arb_PersonId) %>%
-#   pull(Arb_PersonId)
-# 
-# obs_pred %>%
-#   mutate(pw = ifelse(Arb_PersonId %in% pw_ids, "PW", "nPW"))%>%
-#   select(Arb_PersonId, N_months_post_id, observed, predicted, Intervention, pw) %>%
-#   group_by(pw, Intervention, N_months_post_id) %>%
-#   summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
-#   pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
-#   # filter(N_months_post_id < 5, Intervention == "Control") %>%
-#   ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = pw, )) +
-#   # geom_point() +
-#   geom_line(aes(linetype = Type)) +
-#   facet_wrap(~Intervention) +
-#   theme_minimal() +
-#   theme(legend.position = "bottom") +
-#   labs(color = "", linetype = "")
+```{r, message = FALSE}
+# Set whether or not to run the boot strap
+run_boot = FALSE
+
+if (run_boot == TRUE) {
+  
+  predfn <- function(.) {
+    predict(., newdata=new, re.form=NA)
+    }
+
+  # summarise output of bootstrapping
+  sumBoot <- function(merBoot) {
+    return(
+      data.frame(fit = apply(merBoot$t, 2, function(x) as.numeric(quantile(x, probs=.5, na.rm=TRUE))),
+                 lwr = apply(merBoot$t, 2, function(x) as.numeric(quantile(x, probs=.025, na.rm=TRUE))),
+                 upr = apply(merBoot$t, 2, function(x) as.numeric(quantile(x, probs=.975, na.rm=TRUE)))
+      )
+    )
+  }
+  
+  # 'new' data because predfn requires the input to be named "new"
+  new <- overlay_data
+
+  # Save bootstrap products a bootMer object
+  tictoc::tic()
+  boot <- lme4::bootMer(lmer_mod_bin4, predfn, nsim=1000, use.u=TRUE, type="parametric")
+  tictoc::toc()
+
+  # Apply the sumBoot function on the bootMerObject
+  intervals <- sumBoot(boot)
+  
+  # Save boot strap output to not have to run it every single time we want a 
+  # report
+  write_csv(intervals,
+            here::here(str_c("delivery_", delivery), 
+                       "manuscript_tbls_figs/bootMer_intervals_pp.csv")
+            )
+  
+} else {
+  
+  # Load the intervals file 
+  intervals = read_csv(here::here(str_c("delivery_", delivery), 
+                       "manuscript_tbls_figs/bootMer_intervals_pp.csv"))
+}
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ```
 
+```{r}
+# Merge in the lwr and upr intervals to overlay_data
+overlay_data <- bind_cols(
+  overlay_data,
+  # intervals %>% select(-fit) # Does not use the fit values
+  intervals)
+```
+
+```{r}
+observed <- 
+  obs_pred %>%
+  mutate(group = ifelse(slope1 == 1, "Con_nPW", NA),
+         group = ifelse(slope2 == 1, "Con_PW", group),
+         group = ifelse(slope3 == 1, "Int_nPW", group),
+         group = ifelse(slope4 == 1, "Int_PW", group)) %>%
+  group_by(group, N_months_post_id) %>%
+  summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
+  pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
+  filter(Type == "observed") %>%
+  mutate(fit = Avg_Weight_kgs) %>%
+  select(-Type, Avg_Weight_kgs)
+```
+
+
+```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %>%
+  select(N_days_post_id, fit, lwr, upr, group) %>%
+  rename(N_months_post_id = N_days_post_id) %>%
+  mutate(N_months_post_id = ifelse(N_months_post_id == 180, 6, 
+                                 ifelse(N_months_post_id == 540, 18, 0))) %>%
+  ggplot(., aes(x = N_months_post_id, y = fit), color = "blue") +
+  geom_line(aes(N_months_post_id, fit), color = "blue") +
+  geom_ribbon(aes(ymin = lwr, ymax = upr), fill = "red", alpha = 0.1, show.legend = FALSE) +
+  facet_wrap(~ group) +
+    geom_line(data = observed, color = "black") +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  ylim(ylims) +
+  ylab("Average weight (kgs)") +
+  xlab("Months after index visit") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_Weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2)
+```
 # Comparison of index and last visits
 ```{r}
 ind_vs_lv <- 
@@ -1027,25 +1148,7 @@ broom.mixed::tidy(
   lmerTest::lmer(
     A1C ~ Visit * Intervention.factor + (1| Arb_PersonId),
     data = ind_vs_lv),
-  conf.int = TRUE)  %>%
-  as_tibble() %>%
-  mutate_if(is.numeric, ~round(., 3)) %>%
-  gt::gt()
-```
-
-
-```{r}
-#| eval: false
-# correlation = nlme::corSymm(form = ~ 1|Arb_PersonId),
-# correlation = nlme::corCompSymm(form = ~ 1|Arb_PersonId), # Matches defaul lmerTest
-broom.mixed::tidy(
-  nlme::lme(
-    A1C ~ Visit * Intervention.factor, 
-    random = ~ 1| Arb_PersonId,
-    correlation = nlme::corSymm(form = ~ 1|Arb_PersonId),
-    data = (ind_vs_lv %>% drop_na(A1C)))
-  # conf.int = TRUE,
-  )  %>%
+  conf.int = TRUE, effects = "fixed")  %>%
   as_tibble() %>%
   mutate_if(is.numeric, ~round(., 3)) %>%
   gt::gt()
@@ -1060,7 +1163,7 @@ broom.mixed::tidy(
     A1C ~ Visit:Intervention.factor + Visit:(1-Intervention.factor) + Intervention.factor + (1| Arb_PersonId),
     # A1C ~ Visit*Intervention.factor + (1| Arb_PersonId),
     data = ind_vs_lv),
-  conf.int = TRUE)  %>%
+  conf.int = TRUE, effects = "fixed")  %>%
   as_tibble() %>%
   mutate_if(is.numeric, ~round(., 3)) %>%
   gt::gt()
@@ -1073,7 +1176,7 @@ broom.mixed::tidy(
   lmerTest::lmer(
     Triglycerides ~ Visit * Intervention.factor + (1|Arb_PersonId),
     data = ind_vs_lv),
-  conf.int = TRUE)  %>%
+  conf.int = TRUE, effects = "fixed")  %>%
   as_tibble() %>%
   mutate_if(is.numeric, ~round(., 3)) %>%
   gt::gt()
@@ -1085,7 +1188,7 @@ broom.mixed::tidy(
   lmerTest::lmer(
     Triglycerides ~ Visit:Intervention.factor + Visit:(1-Intervention.factor) + Intervention.factor + (1| Arb_PersonId),
     data = ind_vs_lv),
-  conf.int = TRUE)  %>%
+  conf.int = TRUE, effects = "fixed")  %>%
   as_tibble() %>%
   mutate_if(is.numeric, ~round(., 3)) %>%
   gt::gt()
@@ -1098,7 +1201,7 @@ broom.mixed::tidy(
   lmerTest::lmer(
     BMI ~ Visit * Intervention.factor + (1| Arb_PersonId),
     data = ind_vs_lv),
-  conf.int = TRUE)  %>%
+  conf.int = TRUE, effects = "fixed")  %>%
   as_tibble() %>%
   mutate_if(is.numeric, ~round(., 3)) %>%
   gt::gt()
@@ -1110,7 +1213,7 @@ broom.mixed::tidy(
   lmerTest::lmer(
     BMI ~ Visit:Intervention.factor + Visit:(1-Intervention.factor) + Intervention.factor + (1| Arb_PersonId),
     data = ind_vs_lv),
-  conf.int = TRUE) %>%
+  conf.int = TRUE, effects = "fixed") %>%
   as_tibble() %>%
   mutate_if(is.numeric, ~round(., 3)) %>%
   gt::gt()
@@ -1151,64 +1254,4 @@ c("Control", "Intervention") %>%
   # modify_header(stat_1 = "**Control**",
   #               stat_2 = "**Intervention**") %>%
   as_gt()
-```
-
-```{r}
-#| eval: false
-# Display intervention only
-visits_post_id %>%
-  filter(Arb_EncounterId %in% pp_data$Arb_EncounterId,
-         IndexVisit == 1,
-         Intervention.factor == "Intervention") %>%
-  select(all_of(ordered_comorbidity_names)) %>%
-  tbl_summary()
-```
-
-```{r}
-#| eval: false
-# Display control only
-visits_post_id %>%
-  filter(Arb_EncounterId %in% pp_data$Arb_EncounterId,
-         IndexVisit == 1,
-         Intervention.factor == "Control") %>%
-  select(all_of(ordered_comorbidity_names)) %>%
-  tbl_summary()
-```
-
-```{r}
-#| eval: false
-visits_post_id %>%
-  filter(Arb_PersonId %in% pp_data$Arb_PersonId,
-         IndexVisit == 1,
-         LastVisit == 1) %>%
-  nrow()
-```
-
-```{r}
-#| eval: false
-# Why does this person not have a last visit in control???
-# Need to use the Arb_PersonId, and not the EncounterId to filter
-visits_post_id %>%
-  filter(Arb_PersonId %in% pp_data$Arb_PersonId) %>%
-  filter(IndexVisit == 1 | LastVisit == 1) %>%
-  # group_by(Intervention.factor, Arb_PersonId) %>%
-  arrange(Intervention.factor, Arb_PersonId, EncounterDate) %>%
-  select(Arb_PersonId, IndexVisit, LastVisit, N_days_post_id, Intervention.factor) %>%
-  filter(Arb_PersonId == 25240011)
-```
-
-```{r}
-#| eval: false
-visits_post_id %>%
-  filter(Arb_EncounterId %in% pp_data$Arb_EncounterId) %>%
-  filter(Arb_PersonId == 25240011,
-         EE == 1)
-```
-
-```{r}
-#| eval: false
-visits_post_id %>% 
-  filter(Arb_PersonId == 25240011) %>%
-  filter(LastVisit == 1) %>%
-  select(Weight_kgs)
 ```
