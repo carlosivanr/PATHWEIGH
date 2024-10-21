@@ -250,8 +250,6 @@ ee_ene <- bind_rows(ee, ene)
 rm(ee, ene)
 invisible(gc())
 
-
-
 ## First prep the ee_ene data ----
 # Should yield 59 columns
 source(str_c(emr_dir, "subscripts/prep_ee_ene.R"))
@@ -279,8 +277,7 @@ ee_ene %<>%
 ee_ene %<>%
   mutate(EE = ifelse(Arb_PersonId %in% ee_ids, 1, 0))
 
-
-# Cutoff index date at 03/16/2024. No one after index date 3/16/2024 should be 
+# Cutoff index date at 03/16/2024. No one after index date 3/16/2024 should be
 # enrolled.
 if (data_delivery_date == 20240917) {
   # Get the ids that are enrolled past the cut off
@@ -294,7 +291,6 @@ if (data_delivery_date == 20240917) {
   ee_ene <- ee_ene %>%
     filter(!Arb_PersonId %in% ids)
 }
-
 
 
 ## Break ee_ene data frame apart into EE (visits_post_id) and ENE ----
@@ -348,6 +344,7 @@ save(visits,
   file = here(proj_root_dir, "data", str_c("processed_all_visits_", RData))
 )
 
+# Can also be referred to as just the EE from the ee_ene data
 save(
   visits_post_id,
   file = here(proj_root_dir, "data", str_c("processed_visits_post_id_", RData))
