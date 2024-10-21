@@ -23,7 +23,7 @@
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-# Set data_file to the processed ee_ene data which contains all of the 
+# Set data_file to the processed ee_ene data which contains all of the
 # labs procedures, comorbidities, etc. if already processed.
 data_file <- here(
                   str_c("delivery_", data_delivery_date),
@@ -67,7 +67,7 @@ if (file.exists(data_file)) {
   # If the file does not exist, capture labs/procedures, eoss, and comorbidities
   # Set the future plan and options to exceed default memory limits
   plan(multisession, workers = 4)
-  
+
   # Set the max globals size to 10 GB
   options(future.rng.onMisuse = "ignore",
           future.globals.maxSize = (10 * 1024^3))
