@@ -22,21 +22,26 @@ visits <- encounter %>%
 # data delivery forward, it was decided to change the the old GMC Id to the new
 # Id. Switch epic ids before setting the GroupID variable
 if (lubridate::ymd(data_delivery_date) >= lubridate::ymd("20240326")) {
-  visits %<>% 
-    mutate(DepartmentEpicId = ifelse(DepartmentEpicId == 10981033, 10981004, DepartmentEpicId),
-           GroupID = ifelse(DepartmentExternalName == "UCHealth Internal Medicine Clinic - Greeley", 1, GroupID ))
+  visits %<>%
+    mutate(DepartmentEpicId = ifelse(DepartmentEpicId == 10981033,
+                                     10981004,
+                                     DepartmentEpicId),
+           GroupID = ifelse(
+            DepartmentExternalName == "UCHealth Internal Medicine Clinic - Greeley",
+            1,
+            GroupID))
 }
 
 
 # Set Intervention variable ----------------------------------------------------
-# Intervention is based on the date when the clinic crosses over from control to 
-# intervention phase. Set intervention to zero if EncounterDate is before the 
+# Intervention is based on the date when the clinic crosses over from control to
+# intervention phase. Set intervention to zero if EncounterDate is before the
 # crossover date for the specific GroupID, else set to 1.
 visits %<>%
-  mutate(Intervention = ifelse(
-    (GroupID == 1 & EncounterDate < "2021-03-17") |
-      (GroupID == 2 & EncounterDate < "2022-03-17") |
-      (GroupID == 3 & EncounterDate < "2023-03-17"), 0, 1))
+  mutate(Intervention = ifelse((GroupID == 1 & EncounterDate < "2021-03-17") |
+                               (GroupID == 2 & EncounterDate < "2022-03-17") |
+                               (GroupID == 3 & EncounterDate < "2023-03-17"),
+                               0, 1))
 
 visits %<>%
   mutate(Intervention.factor = factor(
@@ -46,23 +51,24 @@ visits %<>%
 # Set Eligibility for Index Visits and restrict Weight and Height --------------
 # At this stage, the Eligible flag is to identify eligible encounters, not
 # necessarily eligible patients
-# Age, BMI, Height & Weight inclusion criteria 
+# Age, BMI, Height & Weight inclusion criteria
 
 # 1. Eligible encounter is defined as meeting Age and BMI criteria only
 # Calculate age of patient at visit using EncounterDate and BirthDate
-# Visits in which the patient is older than 90 are set to 90 to preserve 
+# Visits in which the patient is older than 90 are set to 90 to preserve
 # privacy.
-visits %<>% 
-  mutate(Age = as.numeric((EncounterDate - BirthDate)/365),
+visits %<>%
+  mutate(Age = as.numeric((EncounterDate - BirthDate) / 365),
          Age = ifelse(Age > 90, 90, Age))
 
 # Adults (age >=18) with BMI>=25 at index visit
 # Some visits will not have Age or BMI and will result in an NA value, so those
 # must be turned to 0 in the 2nd mutate statement
 visits %<>%
-  mutate(IndexVisitEligible = ifelse(Age >= 18 & BMI >=25, 1, 0),
-         IndexVisitEligible = ifelse(is.na(IndexVisitEligible), 0, IndexVisitEligible)
-         )
+  mutate(IndexVisitEligible = ifelse(Age >= 18 & BMI >= 25, 1, 0),
+         IndexVisitEligible = ifelse(is.na(IndexVisitEligible),
+                                     0, IndexVisitEligible)
+)
 
 # Index Visit Eligible -------------------------------------------------------
 # Only visits in which a valid NPI is available are eligible for an index
