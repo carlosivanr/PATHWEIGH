@@ -210,7 +210,7 @@ tab1 <- bind_rows(
   mutate(Visit = factor(ifelse(IndexVisit == 1, "Index Visit", "Final Visit"), levels = c("Index Visit", "Final Visit"))) %>%
   mutate(Intervention.factor = factor(Intervention.factor, levels = c("Control", "Intervention"))) %>%
   mutate(Smoking_Status = fct_na_value_to_level(Smoking_Status, level = "Unknown")) %>%
-  select(Age, Sex, Race_Ethnicity, Insurance, BMI,
+  select(Age, Weight_kgs, Sex, Race_Ethnicity, Insurance, BMI,
          Systolic_blood_pressure, Diastolic_blood_pressure,
          A1C:TSH, -`Cystatin C`, EOSS,
          PHQ2, PHQ9, GAD7, Smoking_Status,
@@ -225,6 +225,7 @@ tab1 <- bind_rows(
                   # statistic = list(all_continuous() ~ c("{mean} ({sd}; {min}; {max})")),
                   statistic = list(all_continuous() ~ c("{mean} ({sd})")),
                   label = list(Age ~ "Age (years)",
+                               Weight_kgs ~ "Weight (kg)",
                                Race_Ethnicity ~ "Race/Ethnicity",
                                BMI ~ "BMI (kg/m^2)",
                                Systolic_blood_pressure ~ "Systolic BP (mmHg)",
@@ -1255,3 +1256,52 @@ c("Control", "Intervention") %>%
   #               stat_2 = "**Intervention**") %>%
   as_gt()
 ```
+
+# Supplementary Table 2. 
+
+Patient demographics and health metrics at the index visit for control and intervention phases for all enrolled patients
+```{r}
+supp_2 <- 
+  visits_post_id %>%
+  filter(IndexVisit == 1) %>%
+  mutate(Intervention.factor = factor(Intervention.factor, 
+                                      levels = c("Control", "Intervention"))) %>%
+  mutate(Smoking_Status = fct_na_value_to_level(Smoking_Status, level = "Unknown")) %>%
+  select(Age, Weight_kgs, Sex, Race_Ethnicity, Insurance, BMI,
+         Systolic_blood_pressure, Diastolic_blood_pressure,
+         A1C:TSH, -`Cystatin C`, EOSS,
+         PHQ2, PHQ9, GAD7, Smoking_Status,
+         Intervention.factor) %>%
+  tbl_summary(by = Intervention.factor,
+                  missing = "ifany",
+                  type = list(c(PHQ2, PHQ9, GAD7) ~ 'continuous'),
+                  # statistic = list(all_continuous() ~ c("{mean} ({sd}; {min}; {max})")),
+                  statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+                  label = list(Age ~ "Age (years)",
+                               Weight_kgs ~ "Weight (kg)",
+                               Race_Ethnicity ~ "Race/Ethnicity",
+                               BMI ~ "BMI (kg/m^2)",
+                               Systolic_blood_pressure ~ "Systolic BP (mmHg)",
+                               Diastolic_blood_pressure ~ "Diastolic BP (mmHg)",
+                               Smoking_Status ~ "Smoking Status"),
+                  digits = list(all_categorical() ~ c(0,1),
+                                  all_continuous() ~ c(1,1)))
+
+# Leigh wants to not display the sample size and instead state it in a caption
+# tab1 %<>%
+#   modify_header(stat_1_1 = "**Index Visit**",
+#                 stat_2_1 = "**Final Visit**",
+#                 stat_1_2 = "**Index Visit**",
+#                 stat_2_2 = "**Final Visit**")
+
+supp_2 %>% 
+  as_gt()
+```
+
+# Sensitivity analyses
+
+ITT model using all eligible and enrolled patients
+```{r}
+
+```
+
