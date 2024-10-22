@@ -15,18 +15,18 @@
 
 # Dependencies:
 # requires visits_post_id data set as a dependency because it contains all of
-# the labs, procedures, meds, and vitals captured at the index visit in each 
+# the labs, procedures, meds, and vitals captured at the index visit in each
 # phase
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # Load the mod_data_w_index to utilize the index visits to determine who
 # has had a pw visit
-pp_data <- 
+pp_data <-
   mod_data[["mod_data_w_ind"]] %>%
    filter(Arb_PersonId %in% (mod_data[["ee"]]$Arb_PersonId))
 
 # Filter data set to less than or equal to 18 months after the index date
-pp_data <- 
+pp_data <-
   pp_data %>%
   filter(N_months_post_id <= 18)
 
@@ -41,7 +41,7 @@ ids <- c("Control", "Intervention") %>%
       filter(n >= 2)
   )
 
-pp_data <- 
+pp_data <-
   pp_data %>%
     filter(Arb_PersonId %in% ids[[1]]$Arb_PersonId & Arb_PersonId %in% ids[[2]]$Arb_PersonId)
 
@@ -50,7 +50,7 @@ pp_data <-
 # First create a list of Arb_PersonIds that have at least one PW_Visit, then use
 # that list to create a new time invariant variable (pw) that denotes whether or
 # not that person had a pathweigh visit.
-pw_ids <- 
+pw_ids <-
   pp_data %>%
   filter(PW_Visit == 1) %>%
   distinct(Arb_PersonId) %>%
@@ -66,9 +66,9 @@ pp_data %<>%
 
 # Any rows with pw_tools in control? Should be zero.
 if ((pp_data %>%
-     filter(PW_Visit == 1, 
+     filter(PW_Visit == 1,
             Intervention == "Control") %>%
-     nrow()) !=0) {
+     nrow()) != 0) {
   stop("Error! Control phase rows w PATHWEIGH tools.")
 }
 
@@ -79,15 +79,15 @@ if ((pp_data %>%
      group_by(Arb_PersonId) %>%
      summarise(n = n_distinct(pw)) %>%
      filter(n > 1) %>%
-     nrow()) !=0) {
+     nrow()) != 0) {
   stop("Error! Intervention phase rows with more than 1 unique pw value.")
 }
 
 if ((pp_data %>%
      group_by(Arb_PersonId, Intervention) %>%
      count() %>%
-     filter(n ==1) %>%
-     nrow()) !=0) {
+     filter(n == 1) %>%
+     nrow()) != 0) {
   stop("Error! Patients with only one visit in a phases detected. Should be 2. Check code")
 }
 
@@ -97,7 +97,7 @@ if ((pp_data %>%
 # modeling, so filter it for the encounter ids in pp_data. Since ee does not 
 # contain any index visits the result should be the subset of the patients of 
 # interest without any index visits
-pp_mod_data  <- 
+pp_mod_data  <-
   pp_data %>%
   filter(IndexVisit == 0)
 
