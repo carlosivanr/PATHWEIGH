@@ -15,7 +15,10 @@
 
 
 # Load pp_data -----------------------------------------------------------------
-
+# Loads visits df
+load("D:/PATHWEIGH/delivery_20240917/data/processed_all_visits_20240917.RData")
+load("D:/PATHWEIGH/delivery_20240917/data/pp_mod_data_20240917.RData")
+load("D:/PATHWEIGH/delivery_20240917/data/pp_data_20240917.RData")
 
 # Initialize an empty data frame -----------------------------------------------
 pt_flow <- NULL
@@ -27,18 +30,20 @@ pt_flow <- data.frame(pt_flow) %>%
   mutate(type = as.character(type),
          value = as.numeric(value))
 
-# 1. Unique number of encounters ---------------------------------------------------
+
+# 1. Unique number of encounters -----------------------------------------------
 # Use the visits data frame because it is bounded by the study start date and by
 # the latest deliver date
 pt_flow <- 
   bind_rows(pt_flow,
-    (visits %>% 
-       distinct(Arb_EncounterId) %>% 
-       summarise(value = n()) %>%
-       mutate(type = "Unique encounters") %>%
-       select(type, everything())))
+            (visits %>% 
+               distinct(Arb_EncounterId) %>% 
+               summarise(value = n()) %>%
+               mutate(type = "Unique encounters") %>%
+               select(type, everything())))
 
-# 2. Unique number of patients ----------------------------------------------------
+
+# 2. Unique number of patients -------------------------------------------------
 # Use the visits data frame
 pt_flow <- 
   bind_rows(pt_flow,   
@@ -48,7 +53,8 @@ pt_flow <-
                mutate(type = "Unique patients") %>%
                select(type, everything())))
 
-# 3. Unique number of eligible patients -------------------------------------------
+
+# 3. Unique number of eligible patients ----------------------------------------
 # Eligibility defined by Age, BMI, in addition to restrictions on records 
 # imposed on Height and Weight
 pt_flow <-
@@ -60,7 +66,6 @@ pt_flow <-
                mutate(type = "Unique eligible patients") %>%
                select(type, everything())))
 
-
 # Capture the Arb_PersonIds of those that have an eligible visit
 eligible_ids <- visits %>%
   filter(Eligible == 1) %>%
@@ -68,90 +73,50 @@ eligible_ids <- visits %>%
   pull(Arb_PersonId)
 
 
-# 4. Unique number of enrolled patients ----------------------------------------
+# 4. How many excluded for not having a discernible visit for weight (ene) -----
+pt_flow <-
+  bind_rows(pt_flow,
+            (visits %>%
+               filter(Eligible == 1,
+                      Enrolled == 0) %>%
+               distinct(Arb_PersonId) %>%
+               summarise(value = n()) %>%
+               mutate(type = "Excluded for not having discernible care for weight") %>%
+               select(type, everything())))
+
+
+# 5. How many were excluded for not having 2 visits in both phase --------------
 pt_flow <- 
   bind_rows(pt_flow,
-            pp_data %>%
-            distinct(Arb_PersonId) %>%
-            summarise(value = n()) %>%
-            mutate(type = "Unique enrolled patients") %>%
-            select(type, everything())
-  )
-
-# Eligible and enrolled:
-# for 2024-03-26 76,057
-# means that 359998 - 76057 = 283,941 did not have any discernible care for weight
-# 76,057 were eligible and enrolled
-visits_post_id %>%
-  distinct(Arb_PersonId) %>%
-  nrow()
+            (visits %>%
+               filter(Eligible == 1,
+                      Enrolled == 1,
+                      !Arb_PersonId %in% pp_mod_data$Arb_PersonId) %>%
+               distinct(Arb_PersonId) %>%
+               summarise(value = n()) %>%
+               mutate(type = "Excluded for not having 1 additional weight") %>%
+               select(type, everything())))
 
 
-# How many have two or more in each phase, not censored
-# 54,197 unique patients in mod_data[["ee"]]
-# Means that 76,057 - 54,197 = 21,860 were excluded
-mod_data[["ee"]] %>%
-  distinct(Arb_PersonId) %>%
-  nrow()
-
-
-# How many are not in both phases?
-# 46,619 are not in both phase
-
-mod_data[["ee"]] %>%
-  group_by(Arb_PersonId) %>%
-  summarise(n = n_distinct(Intervention)) %>%
-  filter(n <2) %>%
-  nrow()
-
-
-
-
-
-
-# 5. Unique number of enrolled patients by cohort & intervention ---------------
+# 6. Unique number of enrolled patients by cohort & intervention ---------------
 # In pp_data Cohort is time invariant. This capturing the number of patient at
 # the control index visit will be used.
 pt_flow <- 
   bind_rows(pt_flow,
             (c("Cohort1", "Cohort2", "Cohort3") %>%
-            purrr::map_df(
-              ~pp_data %>%
-                filter(IndexVisit ==1, Cohort == .x, Intervention == "Control") %>%
-                distinct(Arb_PersonId) %>%
-                summarise(value = n()) %>%
-                mutate(type = str_c("Unique patients ", .x)) %>%
-                select(type, everything()))
+               purrr::map_df(
+                 ~pp_data %>%
+                   filter(IndexVisit ==1, Cohort == .x, Intervention == "Control") %>%
+                   distinct(Arb_PersonId) %>%
+                   summarise(value = n()) %>%
+                   mutate(type = str_c("Unique patients ", .x)) %>%
+                   select(type, everything()))
             )
-            )
-
-
-
-# Of patients eligible 359998 - 7578 enrolled per protocol, equals 352,420 
-# patients that are excluded.
-# How many of the 352,420 were excluded because they didn't have a visit for weight
-# How many did not have 2 or more visits (making of mod data)
-# How many removed for censored
-
-# How many were eligible but not enrolled ? 
-# 333,931
-  bind_rows(pt_flow,
-            (visits_post_id %>%
-               distinct(Arb_PersonId) %>%
-               summarise(value = n()) %>%
-               mutate(type = "Unique eligible not enrolled patients") %>%
-               select(type, everything()))
-            )
-  
-# How many did not have 2 or more visits in each phase
-# visits %>%
-#   filter(E)
-
+  )
 
 # Output table to .csv file ----------------------------------------------------
-write_csv(pt_flow, here("tables", str_c("pp_pt_flow_", date_max, "_", Sys.Date(), ".csv")))
-
-
-
-
-  
+write_csv(pt_flow,
+          here(str_c("delivery_", data_delivery_date), 
+               "manuscript_tbls_figs", 
+               "participant_flow_diagram.csv")
+          )
