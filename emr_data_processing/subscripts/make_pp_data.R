@@ -23,7 +23,7 @@
 # has had a pw visit
 pp_data <-
   mod_data[["mod_data_w_ind"]] %>%
-   filter(Arb_PersonId %in% (mod_data[["ee"]]$Arb_PersonId))
+  filter(Arb_PersonId %in% (mod_data[["ee"]]$Arb_PersonId))
 
 # Filter data set to less than or equal to 18 months after the index date
 pp_data <-
@@ -33,7 +33,7 @@ pp_data <-
 # Get the patient ids that have 2 or more visit in either phase
 ids <- c("Control", "Intervention") %>%
   purrr::map(
-    ~pp_data %>%
+    ~ pp_data %>%
       filter(Intervention == .x) %>%
       group_by(Arb_PersonId) %>%
       count() %>%
@@ -66,9 +66,9 @@ pp_data %<>%
 
 # Any rows with pw_tools in control? Should be zero.
 if ((pp_data %>%
-     filter(PW_Visit == 1,
-            Intervention == "Control") %>%
-     nrow()) != 0) {
+       filter(PW_Visit == 1,
+              Intervention == "Control") %>%
+       nrow()) != 0) {
   stop("Error! Control phase rows w PATHWEIGH tools.")
 }
 

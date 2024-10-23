@@ -24,6 +24,10 @@ make_mod_data <- function(data, delivery) {
     filter(Sex != "Unknown") %>%
     filter(Censored == 0)
 
+  # Filter the data to cap the number of months post id
+  data %<>%
+    filter(N_months_post_id <= 18)
+
   # Create separate intervention and control data frames -----------------------
   # In order to capture change in weight, each patient must have at least 2
   # visits in each of the control and intervention phases
@@ -302,8 +306,13 @@ make_mod_data <- function(data, delivery) {
                  select(all_of(names_to_select)))) %>%
     mutate(Arb_PersonId = factor(Arb_PersonId))
 
+  # mod_data with all of the index visits
   mod_data_w_ind <- mod_data
+  
+  # mod_data contains both ee and ene visits
   mod_data <- mod_data %>% filter(IndexVisit == 0)
+  
+  # ee only contains ee visits
   ee <- ee %>% filter(IndexVisit == 0)
 
   # Write out the data set -----------------------------------------------------
