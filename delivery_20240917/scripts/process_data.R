@@ -282,7 +282,7 @@ ee_ene %<>%
 if (data_delivery_date == 20240917) {
   # Get the ids that are enrolled past the cut off
   ids <-
-  ee_ene %>%
+    ee_ene %>%
     filter(IndexVisit == 1,
            EncounterDate >= "2024-03-17") %>%
     pull(Arb_PersonId)
@@ -354,5 +354,5 @@ save(
   ee_ene,
   file = here(proj_root_dir, "data", str_c("ee_ene_", RData))
 )
-
+beepr::beep(sound = 2)
 # END OF SCRIPT ----------------------------------------------------------------
