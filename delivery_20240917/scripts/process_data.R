@@ -98,36 +98,32 @@ data_delivery_date <- 20240917
 date_min <- as.Date("2020-03-17")
 date_max <- as.Date(lubridate::ymd(data_delivery_date))
 
-
 # Source sub-scripts -----------------------------------------------------------
 # Loads all subscript functions into the workspace
 
 # Set the path to the emr_data_processing directory to load scripts/functions
-# that are shared along all separate data delivery dates
+# that are shared along all separate data deliveries
 proj_root_dir <- str_c("delivery_", data_delivery_date)
 proj_parent_dir <- str_remove(here(), proj_root_dir)
 emr_dir <- str_c(proj_parent_dir, "/emr_data_processing/")
 
-# Loads the common set of functions for data deliveries from 03-22-2023 and
-# onward in the emr_data_processing directory
+# Loads the common set of functions for data deliveries 03-22-2023 and beyond
 source(str_c(emr_dir, "subscripts/source_subscripts.R"))
 
 # Encounter Table --------------------------------------------------------------
-# Encounter table contains information from the encounter including weight vals
+# Encounter table contains information from the visit including weight values
 # Clean encounter table by changing -999 values in weight, creates smoking
 # variable and removes asterisks from values, among other tasks. See function
 # notes for more information.
 read_pw_csv("encounter")
 encounter <- prep_encounter(encounter)
-
 invisible(gc())
 
 # Prepare Patient Table --------------------------------------------------------
 # Patient table contains demographic information.
-# recodes sex, race, ethnicity variables and removes asterisks from values
+# Recodes sex, race, ethnicity variables and removes asterisks from values
 read_pw_csv("patient")
 patient <- prep_patient(patient)
-
 invisible(gc())
 
 # Create visits data frame  ----------------------------------------------------
@@ -182,9 +178,9 @@ rm(smart)
 visits <- wpv_naweights(visits)
 
 ## Create WPV ------------------------------------------------------------------
-# WPV is a sum of the number of WPV_* variables. Checks for NAs in any of the
-# WPV_* columns before creating the WPV variable since the creation of WPV will
-# be affected by NAs.
+# At this stage there shouldn't be any NAs in any of the WPV_* variables. This
+# section is to ensure that there aren't any NAs, before creating a variable of
+# the sum of WPV_* indicator variables.
 if (visits %>%
       reframe(across(starts_with("WPV_"), is.na)) %>%
       reframe(across(starts_with("WPV_"), sum)) %>%
@@ -206,12 +202,11 @@ invisible(gc())
 # Sets Cohort and whether or not the patient was enrolled
 visits <- set_index_date(visits)
 
-
 # Last visit in control phase --------------------------------------------------
 # Set the last visit in control's weight, from the first visit in the
 # intervention if and only if the first intervention has a weight, otherwise
-# leave as is work with the visits data frame. Decided on 07/18/2024 to not
-# proceed with this approach. Will cause errors in participant flow diagram if
+# leave as is. Decided on 07/18/2024 to not proceed with this approach. Will
+# cause errors in participant flow diagram if
 # implemented. visits <- assign_last_visit_con(visits)
 
 # Create separate EE and ENE datasets ------------------------------------------
@@ -241,7 +236,6 @@ ene <- visits %>%
     EncounterDate >= IndexDate
   )
 
-
 # Process EE and ENE for labs and comorbidities --------------------------------
 # Process the ee and ene data for labs, procedures, referrals, EOSS, and
 # comorbidities
@@ -254,17 +248,13 @@ invisible(gc())
 # Should yield 59 columns
 source(str_c(emr_dir, "subscripts/prep_ee_ene.R"))
 ee_ene <- prep_ee_ene(ee_ene)
-beepr::beep(sound = 2)
 
 ## Then get the labs, procedures, and comorbidities ----
 # Both arguments should be set to TRUE. Prior functionality of setting to FALSE
 # was built in to expedite the creation of the modeling data set. However,
 # project requirement changes to include meds, labs, procedures, etc. in the
 # modeling data rendered this feature obsolete.
-tic()
 source(str_c(emr_dir, "subscripts/proc_ee_ene.R"))
-toc()
-beepr::beep(sound = 2)
 invisible(gc())
 
 ## Temporary code chunk to modify AST & ALT values, will need to be introduced
@@ -291,7 +281,6 @@ if (data_delivery_date == 20240917) {
   ee_ene <- ee_ene %>%
     filter(!Arb_PersonId %in% ids)
 }
-
 
 ## Break ee_ene data frame apart into EE (visits_post_id) and ENE ----
 # visits_post_id naming maintained to work with legacy and downstream processing
@@ -354,5 +343,7 @@ save(
   ee_ene,
   file = here(proj_root_dir, "data", str_c("ee_ene_", RData))
 )
+
 beepr::beep(sound = 2)
+
 # END OF SCRIPT ----------------------------------------------------------------
