@@ -5,11 +5,10 @@
 # 2. Create N_days after the IndexVisit
 # 3. Create N_months after the IndexVisit
 # 4. Create Year and Quarter variables
-# 5. Create Censor variable
+# 5. Create the Censor variable
 # 6. Create the LastVisit indicator variable
 # 7. Create N_months after the last visit
-# 8. Capture the labs, medications and EOSS at the index and last visits in
-#     each phase
+# 8. Capture the labs, medications and EOSS
 # 9. Capture comorbidities at the index and last visits in each phase
 # 10. Create Weight_kgs variable
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -29,11 +28,11 @@ prep_ee_ene <- function(data) {
   data %<>%
     mutate(N_days_post_id = as.numeric(EncounterDate - IndexDate))
 
-  # Months since Index Visit --------------------------------------------------
-
+  # Months since Index Visit ---------------------------------------------------
+  # Determines the number of months after the index date
   # Create a lubridate interval value and then perform integer division by
   # one month as a date value. Integer division %/% is the opposite of the
-  # modulo %% which gives the remainder
+  # modulo %%. 10 %/% 3 = 3; 10 %% 3 = 1. 
   data %<>%
     mutate(
       N_months_post_id =
@@ -76,6 +75,9 @@ prep_ee_ene <- function(data) {
   # Set the last visit for each patient in each phase with and without weight
   # n.b. Creates two "LastVisit" columns, one for the visit with weight and one
   # for any visit to capture labs, procedures, medications, etc.
+  # 2024-10-23 last visit was made from last visit with weight for the pp paper
+  # to make the last followup visit in the modeling data set as the reference
+  # to capture labs, procedurers, etc.
   data <- set_last_visit(data)
 
   # Categorize N_months_post_lv ------------------------------------------------
@@ -100,9 +102,7 @@ prep_ee_ene <- function(data) {
   # weight value captured at the baseline index visit is set to be used as a
   # covariate and the weight values from non-index visits are set to be used as
   # dependent variables.
-
   data %<>%
-    # select(IndexVisit, Weight_kgs) %>%
     mutate(Weight_bl = ifelse(IndexVisit == 1, Weight_kgs, NA),
            Weight_dv = ifelse(IndexVisit != 1, Weight_kgs, NA))
 
@@ -115,8 +115,8 @@ prep_ee_ene <- function(data) {
     ungroup()
 
   # Create Any_PW_Visit variable -------------------------------------------
-  # ***> Needs additional development CR 07/09/2024
-  # Current version only specifies whether or not the visit was a PW visit.
+  # This function sets a binary indicator to each encounter if any of the
+  # pathweigh tools are used.
   data %<>%
     set_any_pw_visit(.)
 
