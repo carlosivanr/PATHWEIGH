@@ -3,23 +3,27 @@
 # bipap, bariatric surgery, and referrals for eligible and enrolled patients
 # at a given index date either control (0) or intervention (1).
 
-# 1. Procedures
-#  a. O2/CPAP/BIPAP - 30days prior to and 30days after index date
-#  b. Bariatric Surgery - 12 months (365 days) prior to index date
+# 1. O2/CPAP/BIPAP - 30days prior to and 30days after index date
 # 2. Labs - 30days prior to and 30days after index date
 # 3. Screeners - 30days prior to and 30days after index date
 #  a. PHQ2/9
 #  b. GAD7
-# 4. Referrals - 30days prior to and 30days after index date
+# 4. Bariatric Surgery - At any time during the phase
+# 5. Referrals - At any time during the phase
 
-# n.b. This script is designed to be deployed on control and intervention index
-# visit data separately
-
-# - 08/01/2023 Leigh & Qing, capture within the respective time windows at
+# - 08-01-2023: Leigh & Qing, capture within the respective time windows at
 #   index date and at last visit.
-# - 08/04/2023 - converted function() to script to include all of the steps to
-#   break apart visits_post_id, capture labs and procedures, and then re-stack
+# - 10-24-2024: Stats group, capture bariatric procedures and referrals at any 
+#   time during the phase.
 
+# n.b. 
+# - This script is designed to be deployed on control and intervention index
+#   visit data separately
+# - To capture labs for the last visit, a pseudo index date will be created to
+#   serve as the reference date. For the last visits in control and in
+#   intervention, the bariatric surgery and referrals values will not be valid
+#   because the search windows will be from the encounter date of the last visit
+#   to cohort_end_date which may be a small period.
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 labs_procedures <- function(temp) {
@@ -31,7 +35,7 @@ labs_procedures <- function(temp) {
   }
 
   # Filter the input data frame to the index visits in the specified phase
-  # Input to labs and procedure should be a subset of the data either last visit
+  # Input to labs and procedures should be a subset of either the last visit
   # or index visit in each phase of the study. The index visit variable is to
   # trick the rest of the function into thinking that the reference visit is
   # the index visits. Reference visit meaning last or index visit.
@@ -50,8 +54,9 @@ labs_procedures <- function(temp) {
   }
 
   # Set an algorithm to determine the Cohort_end_date by phase -----------------
-  # If the input is in the control phase, then the end date will be set by
-  # cohort to coincide with the date that the each cohort crosses over.
+  # If the input is in the control phase, then the end date will be assigned by
+  # cohort to coincide with the date that each cohort crosses over to
+  # intervention.
   # If the input is in the intervention phase, then the end date is set to
   # September 16, 2024 as this is the last date, we will likely use to capture
   # data for the main research article
@@ -70,7 +75,7 @@ labs_procedures <- function(temp) {
   # distinct_pts_x_ind, needed downstream for labs and procedures
   # These are unique combinations of PersonIds and Index Dates at a specified
   # intervention because the original algorithm was never designed to work with
-  # two index dates.
+  # two index dates (1 for control and 1 for intervention).
   distinct_pts_x_ind <- temp %>%
     filter(Censored == 0,
            IndexVisit == 1) %>%
@@ -139,7 +144,9 @@ labs_procedures <- function(temp) {
 
   # Screeners  ---------------------------------------------------------------
   # Prep Screener Function - Captures one value per person to merge into the
-  # input visits_post_id data frame.
+  # input visits_post_id data frame. Screeners (PHQ/GAD) were problematic as the
+  # data contained for the same patient at the same encounter, multiple values,
+  # multiple dates, sometimes multiple values across the same date.
   prep_screener <- function(screener_data) {
     # pull encounter ids for records that have inconsistent values across the
     # same instrument, encounter and patient
@@ -377,9 +384,18 @@ labs_procedures <- function(temp) {
     left_join(temp, O2CPAPBIPAP_data, by = c("Arb_PersonId", "IndexDate")) %>%
     mutate(O2CPAPBIPAP = ifelse(is.na(.$O2CPAPBIPAP), 0, O2CPAPBIPAP)) #%>%
 
-  # Bariatric Surgery V1 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-  # Look back 12 months (365 days) prior to index date only in each phase
+  # %%%%%%%%%%%%%%%% WORKING HERE TO MODIFY THE SEARCH PERIOD %%%%%%%%%%%%%%%%%%
+  # Bariatric procedure --------------------------------------------------------
+  # Search between the index date and the cohort end date for evidence of a
+  # procedure. The input data frames to this function are split as crosses
+  # between intervention phases and reference visit, i.e. ind_con, lv_con,
+  # ind_int, and lv_int. The index visit is set according to the first eligible
+  # visit in each phase and the cohort_end_date is set as either the crossover
+  # date for control phase or the date_max for intervention. Therefore any visit
+  # within the phase can be found where the procedure date is between the index
+  # date and the cohort end date.
 
+  # Get the Arb_PersonIds and dates of all available bariatric procedures
   bariatric <-
     procedure %>%
     filter(Category == "bariatric procedure", !is.na(ProcedureDate)) %>%
@@ -388,7 +404,9 @@ labs_procedures <- function(temp) {
 
   bariatric_data <-
     left_join(distinct_pts_x_ind, bariatric, by = "Arb_PersonId") %>%
-    filter(ProcedureDate <= Cohort_end_date) %>%
+    filter(!is.na(ProcedureDate)) %>%
+    filter(ProcedureDate <= Cohort_end_date,
+           ProcedureDate >= IndexDate) %>%
     group_by(Arb_PersonId, IndexDate) %>%
     summarise("BariatricSurgery" = 1 * (any(!is.na(ProcedureDate))),
               .groups = "rowwise")
@@ -397,22 +415,27 @@ labs_procedures <- function(temp) {
     left_join(temp, bariatric_data, by = c("Arb_PersonId", "IndexDate")) %>%
     mutate(BariatricSurgery = ifelse(is.na(.$BariatricSurgery), 0, 1))
 
-  # Referrals V2 ---------------------------------------------------------------
-  # *** Use 30 days before and after
-  # Referrals placed here because it relies on distinct_pts_x_ind
-  # The order deviates from the original version, but makes use of the
-  # function where its scope contains distinct_pts_x_ind
-
+  # Referrals ------------------------------------------------------------------
+  # Search between the index date and the cohort end date for evidence of a
+  # referral. See section Bariatric procedure for more details on how the
+  # algorithm functions
+  
   # Create a subset of data consisting of the unique patient IDs, referral
   # dates, and category of referral
   referrals_sub <-
     referrals %>%
+    filter(Arb_PersonId %in% temp$Arb_PersonId) %>%
     select(Arb_PersonId, ReferralDate, Category) %>%
     distinct()
 
+  # Merge distinct_pt_x_in and referrals sub, filter to those referrals that
+  # were found between the index date and cohort end date. Next recode the cell
+  # values to be used as reasonable column names without spaces. Finally, pivot
+  # the data wider
   referrals_data_wide <-
     left_join(distinct_pts_x_ind, referrals_sub, by = "Arb_PersonId") %>%
-    filter(ReferralDate <= Cohort_end_date) %>%
+    filter(ReferralDate <= Cohort_end_date,
+           ReferralDate >= IndexDate) %>%
     mutate(Category =
            recode(Category,
                   "Referred to bariatric surgery" = "Ref_BariatricSurgery",
