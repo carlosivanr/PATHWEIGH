@@ -89,12 +89,12 @@ proc_comorbidities <- function(data){
   # 2 years
   # df_list <- lapply(df_list, capture_comorbidities, 2, 2)
   # Apply the proc data function
-  tic()
+  # tic()
   df_list <-
     c(1, 2, 3, 4) %>%
     future_map(~ df_list[[.x]] %>% capture_comorbidities(., 2, 2))
-  toc()
-  beepr::beep(sound = 2)
+  # toc()
+  # beepr::beep(sound = 2)
   
   # %%%%%%%%%%%%%%%%% REGION FROM PROC COMORBIDITIES %%%%%%%%%%%%%%%%%%%%%%%%%%%
   # Clean up data before stitching ---------------------------------------------
@@ -181,6 +181,7 @@ proc_comorbidities <- function(data){
   
   # Save comorbidity names to data directory and assign to global environment
   comorbidity_names <<- comorbidity_names
+  
   saveRDS(comorbidity_names, 
           file = here(proj_root_dir, 
                       "data", 
