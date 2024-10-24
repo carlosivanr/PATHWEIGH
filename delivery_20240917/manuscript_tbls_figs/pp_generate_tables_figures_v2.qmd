@@ -1600,4 +1600,3 @@ overlay_data %>%
                 hjust = "left"),
                 size = 2)
 ```
-
