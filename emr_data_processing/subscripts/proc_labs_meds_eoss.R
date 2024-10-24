@@ -121,7 +121,7 @@ proc_labs_meds_eoss <- function(data){
   df_list <-
   c(1,2,3,4) %>%
     future_map(~ df_list[[.x]] %>% proc_data(.))
-  beepr::beep(sound = 2)
+  # beepr::beep(sound = 2)
   
   # rm(procedure, labs, flowsheets, referrals, meds)
 

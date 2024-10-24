@@ -1,15 +1,20 @@
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # Carlos Rodriguez, PhD. Dept. of Fam. Med. CU Anschutz Medical Campus
-# 02/02/2024
-# Get labs, meds, and create EOSS as a function
-#
+# 02-02-2024
+# Get labs, procedures, and medications
+
 # Description:
-# The purpose of this script is break apart the visits_post_id data frame and
-# then process the visits data to utilize index date at control and intervention
-# and last visit (excluding index visits) at control and intervention separately
-# to capture labs, meds and create the EOSS. Needs four different data frames
-# with non-overlapping visits to work properly.
-#
+# This script was designed to capture labs, procedures, and medications. This
+# script takes in the input and splits the data into 4 different sub data frames
+# that include the index visits in control and in intervention, and the last
+# visits in control and intervention.
+
+# The purpose of breaking apart the data, is to use the same core set of 
+# functions on different sub sets of data where only the reference dates to link
+# the additional variables to has been changed. This function also procesess the
+# 4 subsets in parallel to speed up processing.
+
+
 # Dependencies:
 # labs_procedures.R
 # medications.R
@@ -98,12 +103,12 @@ proc_labs_meds <- function(data) {
   invisible(gc())
 
   # Apply the proc data function
-  tic()
+  # tic()
   df_list <-
     c(1, 2, 3, 4) %>%
     future_map(~ df_list[[.x]] %>% proc_data(.))
-  toc()
-  beepr::beep(sound = 2)
+  # toc()
+  # beepr::beep(sound = 2)
 
   # Clean up data before stitching ---------------------------------------------
   # Since the labs_procedures(), capture_medications(), and eoss() functions
