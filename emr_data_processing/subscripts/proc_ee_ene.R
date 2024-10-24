@@ -17,9 +17,9 @@
 # Capturing, labs/procedures, referrals, meds, eoss, and comorbidities is one of
 # the most time consuming sections of the pathweigh data processing pipeline. In
 # order to facilitate pipeline development, labs/procedures, meds, eoss, and
-# comorbidities are processed once, and then store. The purpose is to re-use the
-# captured data if and when changes to the pipelien are made instead of
-# capturing these data from scratch every single time.
+# comorbidities are processed once then stored. The purpose is to re-use the
+# captured data if and when changes to the pipeline are made. Instead of
+# capturing these data from scratch every single time, it should retrieve them.
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -73,6 +73,10 @@ if (file.exists(data_file)) {
           future.globals.maxSize = (10 * 1024^3))
 
   # PROC LABS MEDS PROCEDURES --------------------------------------------------
+  # *** n.b. meds, bariatric procedures, and referrals captured at the last
+  # visit are not valid, because their time window to capture these metrics is
+  # from the date of the last visit to either the cross over date for control
+  # phase visits, or 9-16-2024 for the intervention visits.
   source(str_c(emr_dir, "subscripts/proc_labs_meds.R"))
   invisible(gc())
   ee_ene <- proc_labs_meds(ee_ene)
@@ -100,7 +104,7 @@ if (file.exists(data_file)) {
        file = here(str_c("delivery_", data_delivery_date),
                    "data",
                    str_c("processed_ee_ene_", RData)))
-  
+
   rm(processed_ee_ene)
 
 }
