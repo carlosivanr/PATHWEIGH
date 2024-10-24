@@ -12,18 +12,8 @@
 # 2. PW Smart Set
 # 3. PW Weight Management Questionnaire (WMQ)
 
-# Any_PW_Visit is created by first determining which encounters met criteria
-# for a PW Visit. Then of those that met criteria for PW_Visit, their
-# Arb_PersonId was used to filter the input data set. Next, the filtered data is
-# grouped by Arb_PersonId and PW_Visit, and arranged by EncounterDate. Then the
-# grouped data frame is sliced to extract the earliest visit in each group of
-# visits per patient, pw or not pw. Once the data is sliced, it is filtered for
-# PW_Visit == 1 to extract the EncounterDate of the first PW_Visit for each
-# patient. These PW_index_dates are then merged into the main data frame to
-# join with all visits. Finally Any_PW_Visit is created by comparing the
-# EncounterDate to the PW_index_date. If it's after, then it's marked as a
-# PW_Visit (1), else it's marked as not (0). NAs are converted to 0.
-
+# PW_Visit is created by assigning a 1 to any visit that has any of evidence of
+# the pathweigh tools.
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 set_any_pw_visit <- function(data) {
