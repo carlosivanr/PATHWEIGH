@@ -8,13 +8,11 @@
 
 # - LastVisit_Weight
 # - LastVisit
-
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # Mark the last visit in a phase -----------------------------------------------
 # Each last visit must have a weight value to be eligible for a last visit
 set_last_visit <- function(temp) {
-  tic()
   # Set the last visit with weight ----
   # Get the encounter id of the last visit for each patient in each phase
   enc_ids <-
@@ -43,8 +41,10 @@ set_last_visit <- function(temp) {
     mutate(LastVisit = ifelse((Arb_EncounterId %in% enc_ids), 1, 0))
 
   # Set the LastVisit to the last visit with weight
-  # temp %<>%
-  #   mutate(LastVisit = LastVisit_Weight)
+  # Capture labs procedures & comorbidities on the last visit with a weight
+  # value
+  temp %<>%
+    mutate(LastVisit = LastVisit_Weight)
 
   # No visits with a missing weight are flagged as a LastVisit ----
   if ((temp %>%
@@ -53,6 +53,5 @@ set_last_visit <- function(temp) {
     stop("Last visits with NA weights detected. Revise code.")
   }
 
-  toc()
   return(temp)
 }
