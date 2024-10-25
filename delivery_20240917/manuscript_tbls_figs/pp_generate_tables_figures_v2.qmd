@@ -180,9 +180,10 @@ visits_post_id %<>%
   mutate(BMI = ifelse(Arb_EncounterId == 170254415001, NA, BMI))
 ```
 
-### The following output is automated. Some manual manipulation will be needed upon each iteration for the final manuscript
+### The following output is automated. Some manual manipulation will be needed for the final manuscript when the content of all tables and the figures are finalized.
 1. Change BMI kg/m^2 to superscript the 2.
 2. Change font (once all tables/figs are finalized)
+3. Change Control to "Usual Care" through out tables
 
 # Total sample
 Data is restricted to those that had 2 or more visits in both control and intervention phases of the study from data delivery 2024-09-17.Enrollment cut off date of 2024-03-15.
@@ -210,7 +211,7 @@ tab1 <- bind_rows(
   mutate(Visit = factor(ifelse(IndexVisit == 1, "Index Visit", "Final Visit"), levels = c("Index Visit", "Final Visit"))) %>%
   mutate(Intervention.factor = factor(Intervention.factor, levels = c("Control", "Intervention"))) %>%
   mutate(Smoking_Status = fct_na_value_to_level(Smoking_Status, level = "Unknown")) %>%
-  select(Age, Weight_kgs, Sex, Race_Ethnicity, Insurance, BMI,
+  select(Age, Sex, Race_Ethnicity, Insurance, Weight_kgs, BMI,
          Systolic_blood_pressure, Diastolic_blood_pressure,
          A1C:TSH, -`Cystatin C`, EOSS,
          PHQ2, PHQ9, GAD7, Smoking_Status,
@@ -481,7 +482,7 @@ lmer_mod_bin <- lmerTest::lmer(Weight_dv ~
           (1| Arb_PersonId),
 
           # Input data frame
-          data=pp_mod_data
+          data = pp_mod_data
           )
 
 # broom.mixed::tidy(lmer_mod_bin)
