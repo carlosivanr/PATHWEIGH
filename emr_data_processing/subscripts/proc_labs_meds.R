@@ -24,8 +24,11 @@
 proc_labs_meds <- function(data) {
   # Load functions -------------------------------------------------------------
   source(str_c(emr_dir, "subscripts/labs_procedures.R"))
-  source(str_c(emr_dir, "subscripts/medications.R"))
-
+  # The older version of meds, captures the frequencies of each AOM, whereas
+  # the newer one is just a binary whether or not patient had AOM Rx within
+  # phase, and counts of Rx
+  # source(str_c(emr_dir, "subscripts/medications.R")) # Older version of meds
+  source(str_c(emr_dir, "subscripts/capture_medications.R")) # Updated 10-2024
   # Create data subsets --------------------------------------------------------
   ## 1. index visits in control phase ----
   # Can be processed normally without modifying the index date
@@ -111,12 +114,11 @@ proc_labs_meds <- function(data) {
   # beepr::beep(sound = 2)
 
   # Clean up data before stitching ---------------------------------------------
-  # Since the labs_procedures(), capture_medications(), and eoss() functions
-  # require an index date, data subsets that do not have an index visit are set
-  # to 1 and the index date is set to the encounter date to "trick" the function
-  # into working correctly. This chunk of code reverts the IndexVisit and
-  # IndexDate columns back to their original state. Only needed for lv_con and
-  # lv_int subsets.
+  # Since the labs_procedures(), capture_medications() functions require an
+  # index date, lv data subsets that do not have an index visit are set to 1
+  # and the index date is set to the encounter date to "trick" the function into
+  # working correctly. This chunk of code reverts the IndexVisit and IndexDate
+  # columns back to their original state. Only needed for lv_con and lv_int sets
   clean_data <- function(temp) {
     # If the data frame contains an IndexDate_backup column, then modify
     if (sum(grepl("IndexDate_backup", names(temp))) == 1) {
