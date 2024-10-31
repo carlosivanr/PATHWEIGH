@@ -75,7 +75,7 @@
 # Year 0 March 17, 2020 - March 16, 2021, Baseline
 # Year 1 March 17, 2021 - March 16, 2022, Group 1 crosses over to intervention
 # Year 2 March 17, 2022 - March 16, 2023, Group 2 crosses over to intervention
-# Year 3 March 17, 2022 - March 16, 2024, Group 3 crosses over to intervention
+# Year 3 March 17, 2023 - March 16, 2024, Group 3 crosses over to intervention
 
 # Built with R 4.2.2
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
