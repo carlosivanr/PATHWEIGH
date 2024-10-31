@@ -17,6 +17,19 @@ library(gtsummary)
 library(magrittr, include.only = "%<>%")
 ```
 
+```{r}
+# When set to TRUE, behavior is perfrom 1,000 simulations 
+# for bootstrapping the SEs to calculate prediction 
+# intervals 
+run_boot = FALSE
+
+# When set to TRUE, behavior is set to get predicted values
+# for the itt sensitivity model where patients just needed 
+# to have at least one followup in one phase as opposed to
+# one followup in both phases.
+predict_itt_sen = FALSE
+
+```
 ```{r, table formatting functions}
 # Declare model output and table formatting functions
 
@@ -182,9 +195,7 @@ visits_post_id %<>%
 ```
 
 ### The following output is automated. Some manual manipulation will be needed for the final manuscript when the content of all tables and the figures are finalized.
-1. Change BMI kg/m^2 to superscript the 2.
-2. Change font (once all tables/figs are finalized)
-3. Change Control to "Usual Care" through out tables
+1. Change font (once all tables/figs are finalized)
 
 # Total sample
 Data is restricted to those that had 2 or more visits in both control and intervention phases of the study from data delivery 2024-09-17.Enrollment cut off date of 2024-03-15.
@@ -226,12 +237,16 @@ tab1 <- bind_rows(
       tbl_summary(by = Visit,
                   missing = "ifany",
                   type = list(c(PHQ2, PHQ9, GAD7) ~ 'continuous'),
+
+                  # Temporarily modify statistic to show min and max to check data ranges
+                  # are reasonable
                   # statistic = list(all_continuous() ~ c("{mean} ({sd}; {min}; {max})")),
+
                   statistic = list(all_continuous() ~ c("{mean} ({sd})")),
                   label = list(Age ~ "Age (years)",
                                Weight_kgs ~ "Weight (kg)",
                                Race_Ethnicity ~ "Race/Ethnicity",
-                               BMI ~ "BMI (kg/m^2)",
+                               BMI ~ "BMI (kg/m\U00B2)", # U00B2 will display meters squared
                                Systolic_blood_pressure ~ "Systolic BP (mmHg)",
                                Diastolic_blood_pressure ~ "Diastolic BP (mmHg)",
                                Smoking_Status ~ "Smoking Status"),
@@ -249,7 +264,7 @@ tab1 %<>%
   modify_spanning_header(c("stat_1_1", "stat_2_1") ~ "**Usual Care**") %>%
   as_gt()
 
-tab1
+tab1 
 ```
 
 # Table: Identification of WPVs (OBHPI, WMQ, SMART, etc.) and referrals, procedures,
@@ -586,8 +601,6 @@ pp_mod_data %>%
 # tables or figures, this code is designed to save the output as a csv file 
 # after the initial run. This output can then be loaded and utilized to generate
 # tables and figures.
-run_boot = FALSE
-
 if (run_boot == TRUE) {
   
   predfn <- function(.) {
@@ -951,9 +964,6 @@ pp_mod_data %>%
 ```
 
 ```{r, message = FALSE}
-# Set whether or not to run the boot strap
-run_boot = FALSE
-
 if (run_boot == TRUE) {
   
   predfn <- function(.) {
@@ -1179,6 +1189,8 @@ c("Control", "Intervention") %>%
   as_gt()
 ```
 
+\newpage
+
 # Supplementary Table 2. 
 
 Patient demographics and health metrics at the index visit for control and intervention phases for all enrolled patients
@@ -1202,7 +1214,7 @@ supp_2 <-
                   label = list(Age ~ "Age (years)",
                                Weight_kgs ~ "Weight (kg)",
                                Race_Ethnicity ~ "Race/Ethnicity",
-                               BMI ~ "BMI (kg/m^2)",
+                               BMI ~ "BMI (kg/m\U00B2)",
                                Systolic_blood_pressure ~ "Systolic BP (mmHg)",
                                Diastolic_blood_pressure ~ "Diastolic BP (mmHg)",
                                Smoking_Status ~ "Smoking Status"),
@@ -1214,6 +1226,8 @@ supp_2 %>%
                 stat_2 = "**Intervention**") %>%
   as_gt()
 ```
+
+\newpage
 
 # Sensitivity analyses
 
@@ -1335,15 +1349,25 @@ slopes <- left_join(
  ) 
 ```
 
+\newpage
+
 ## Figure: Model figure
 ```{r}
-# Create figure of observed vs predicted values
-obs_pred <- 
+if (predict_itt_sen == TRUE) {
+  obs_pred <- 
   bind_cols(ee,
           (broom.mixed::augment(lmer_mod_sen) %>% select(.fixed))) %>%
   mutate(observed = Weight_dv,
          predicted = .fixed) %>%
   select(Arb_PersonId, N_months_post_id, observed, predicted, Intervention)
+
+  # save itt_sensitivity_model_obs_pred
+  saveRDS(obs_pred, file = here::here(str_c("delivery_", delivery), 
+                                      "manuscript_tbls_figs/itt_sensitivity_model_obs_pred.RDS"))
+} else {
+  obs_pred <- readRDS(file = here::here(str_c("delivery_", delivery), 
+                                        "manuscript_tbls_figs/itt_sensitivity_model_obs_pred.RDS"))  
+}
 ```
 
 ### All panels display predicted values from the ITT model.
@@ -1371,10 +1395,6 @@ overlay_data <-
 # predict function for bootstrapping
 # Code from Dean Marchiori
 # https://www.deanmarchiori.com/posts/2023-02-06-prediction-intervals-for-linear-mixed-effects-models/
-
-# Set whether or not to run the boot strap
-run_boot = FALSE
-
 if (run_boot == TRUE) {
   
   predfn <- function(.) {
