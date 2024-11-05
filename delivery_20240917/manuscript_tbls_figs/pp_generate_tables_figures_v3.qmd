@@ -476,7 +476,7 @@ clinic_engagement %>%
   theme(text = element_text(family = "Palatino"))
 ```
 
-Caption: Engagement scores defined as the sum of 8 binary indicator of measures of engagement. Measures of engagement include 1) Zoom intro meeting, 2) In-person clinic visit from a member of the PATHWEIGH team, 3) Requested support from PATHWEIGH clinical team, 4) Used PATHWEIGH e-Learning module, 5) WOF training, 6) use of PATHWEIGH Placard, 7) Attended learning community, 8) Chose practice champion.
+<!-- Caption: Engagement scores defined as the sum of 8 binary indicator of measures of engagement. Measures of engagement include 1) Zoom intro meeting, 2) In-person clinic visit from a member of the PATHWEIGH team, 3) Requested support from PATHWEIGH clinical team, 4) Used PATHWEIGH e-Learning module, 5) WOF training, 6) use of PATHWEIGH Placard, 7) Attended learning community, 8) Chose practice champion. -->
 
 
 ```{r, warning=FALSE, message=FALSE, fig.dpi = 600, fig.width=6.5}
