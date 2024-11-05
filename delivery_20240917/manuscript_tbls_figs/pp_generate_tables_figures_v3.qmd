@@ -28,8 +28,8 @@ run_boot = FALSE
 # to have at least one followup in one phase as opposed to
 # one followup in both phases.
 predict_itt_sen = FALSE
-
 ```
+
 ```{r, table formatting functions}
 # Declare model output and table formatting functions
 
@@ -170,7 +170,7 @@ delivery <- params$delivery
 load(str_c(proj_root, "delivery_", delivery, "/data/pp_data_", delivery, ".Rdata"))
 
 # Load visits_post_id
-load(str_c(proj_root, "delivery_", delivery, "/data/processed_visits_post_id_", delivery, ".Rdata"))
+load(str_c(proj_root, "delivery_", delivery, "/data/visits_post_id_", delivery, ".Rdata"))
 
 # Load pp_mod_data for modeling
 load(str_c(proj_root, "delivery_", delivery, "/data/pp_mod_data_", delivery, ".Rdata"))
@@ -195,7 +195,6 @@ visits_post_id %<>%
 ```
 
 ### The following output is automated. Some manual manipulation will be needed for the final manuscript when the content of all tables and the figures are finalized.
-1. Change font (once all tables/figs are finalized)
 
 # Total sample
 Data is restricted to those that had 2 or more visits in both control and intervention phases of the study from data delivery 2024-09-17.Enrollment cut off date of 2024-03-15.
@@ -428,7 +427,8 @@ hist <- clinic_engagement %>%
            Cohort = factor(Cohort_n))
 ```
 
-```{r, warning=FALSE, message=FALSE, fig.dpi = 600, fig.width=6.5, fig1}
+```{r, warning=FALSE, message=FALSE, fig.dpi = 600, fig.width=6.5}
+#| eval: false
 # Calculate percentage where the denominator is total in each respective cohort
 hist %>%
   group_by(Cohort, Engagement) %>%
@@ -442,7 +442,74 @@ hist %>%
   scale_fill_brewer(palette="Set2")
 ```
 
+```{r}
+clinic_engagement %>% 
+  mutate(score_cat = case_when(Engagement == 0 ~ "low",
+                               Engagement == 1 ~ "low",
+                               Engagement == 2 ~ "low",
+                               Engagement == 3 ~ "middle",
+                               Engagement == 4 ~ "middle",
+                               Engagement == 5 ~ "middle",
+                               Engagement == 6 ~ "high",
+                               Engagement == 7 ~ "high",
+                               Engagement == 8 ~ "high" )) %>%
+  mutate(score_cat = factor(score_cat, levels = c("low", "middle", "high"))) %>%
+  select(score_cat) %>%
+  tbl_summary() %>%
+  as_gt()
+```
+
+```{r, warning=FALSE, message=FALSE, fig.dpi = 600, fig.width=6.5, fig1}
+#| eval: false
+
+# Calculate percentage where the denominator is total of all clinics
+clinic_engagement %>% 
+  group_by(Engagement) %>% 
+  count() %>%
+  mutate(p = n / 56) %>%
+  ggplot(., aes(x = Engagement, y = p)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::label_percent()) +
+  theme_minimal() +
+  ylab("Percentage of all clinics") +
+  xlab("Engagement score") +
+  theme(text = element_text(family = "Palatino"))
+```
+
 Caption: Engagement scores defined as the sum of 8 binary indicator of measures of engagement. Measures of engagement include 1) Zoom intro meeting, 2) In-person clinic visit from a member of the PATHWEIGH team, 3) Requested support from PATHWEIGH clinical team, 4) Used PATHWEIGH e-Learning module, 5) WOF training, 6) use of PATHWEIGH Placard, 7) Attended learning community, 8) Chose practice champion.
+
+
+```{r, warning=FALSE, message=FALSE, fig.dpi = 600, fig.width=6.5}
+clinic_engagement %>% 
+  select(`zoom intro`:Practice_Champion_Used) %>% 
+  rename("Zoom intro" = "zoom intro",
+         "In-person visit" = "in-person_visit",
+         "Requested support" = "requested_support",
+         "Used e-learning" = "used_e-learning",
+         "WOF training" = "WOF_training",
+         "Used placard" = "placard_in_use",
+         "Learning community" = "learning_community",
+         "Used practice chamption" = "Practice_Champion_Used") %>%
+  summarise_all(sum) %>%
+  pivot_longer(., cols = everything(), names_to = "engagement", values_to = "count") %>%
+  mutate(p = count / 56) %>% 
+  arrange(p) %>%
+  mutate(engagement = factor(engagement, levels = c("Learning community",
+                                                    "WOF training",
+                                                    "Used placard",
+                                                    "Used practice chamption",
+                                                    "Requested support",
+                                                    "Used e-learning",
+                                                    "In-person visit",
+                                                    "Zoom intro"))) %>%
+  ggplot(., aes(x = engagement, y = p)) +
+  geom_col() + 
+  scale_y_continuous(labels = scales::label_percent()) +
+  theme_minimal() +
+  ylab("Percentage of all clinics") +
+  xlab("") +
+  coord_flip()
+```
 
 # ITT model
 ```{r}
@@ -534,7 +601,7 @@ tab %>%
 ```
 
 ```{r}
-# Grab slopes in the output table before converting to gt table
+# Grab slopes from the output table
 slopes <-
   tab %>%
   filter(grepl(":", term)) %>%
@@ -589,7 +656,6 @@ pp_mod_data %>%
   mutate(N_days_post_180 = rep(c(0,0,360),2))
 ```
 
-
 ```{r, message = FALSE}
 # Bootstrapped prediction intervals
 # Code from Dean Marchiori
@@ -643,7 +709,6 @@ if (run_boot == TRUE) {
 }
 ```
 
-
 ```{r}
 # Merge in the lwr and upr intervals to overlay_data
 overlay_data <- bind_cols(
@@ -669,11 +734,15 @@ overlay_data <- overlay_data %>%
 # Slopes data captured upstream in Table: Model Output section
 # Adds columns to the data frame that will be used to display the "Rate of change" text in the
 # figures of the observed and line of predicted values.
+slopes <- data.frame(slopes) %>% 
+  mutate(across(c(estimate, post_180_estimate), ~ round(., 2))) 
+  
 slopes %<>%
+  mutate(estimate = format(estimate, nsmall = 2)) %>%
   mutate(lab = str_c("Rate of change\n0-6mo: ", estimate, " kg/month\n6-18mo: ", post_180_estimate, " kg/month")) %>%
   mutate(Avg_Weight_kgs = ifelse(term == "Control:N_months_post_id", 106, 106),
          N_months_post_id = 1.5,
-         Intervention = ifelse(group == "Con", "Control", "Intervention"))
+         Intervention = ifelse(group == "Con", "Control", "Intervention")) 
 ```
 
 ```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
@@ -683,8 +752,8 @@ ylims <- c(100, 113)
 # This labelling functions was added to change "Control" to "Usual Care"
 # in the figures
 face_names <- as_labeller(
-  c(`Control` = "Usual Care",
-    `Intervention` = "Intervention")
+  c(`Control` = "A",
+    `Intervention` = "B")
 )
 
 # Instead of superimposing geom_ribbon(), this version
@@ -718,7 +787,8 @@ overlay_data %>%
                 y = Avg_Weight_kgs, 
                 label = lab,
                 hjust = "left"),
-                size = 2) 
+                size = 2) +
+  theme(strip.text.x = element_text(hjust = 0, face = "bold"))
 ```
 
 # 4-slopes model
@@ -843,7 +913,7 @@ tab %>%
 
 ```{r}
 # V1 Code
-# Grab slopes in the output table before converting to gt table
+# Grab slopes in the output table
 slopes <- tab %>%
   filter(grepl(":", term)) %>%
   select(term, estimate)
@@ -885,9 +955,6 @@ pp_mod_data %>%
        pw_pat, Phase) %>%
   group_by(group) %>%
   summarise_all(mean, .groups = "drop")
-
-# overlay_data %>%
-#   gt::gt()
 ```
 
 ```{r}
@@ -899,9 +966,6 @@ overlay_data %<>%
   slice(rep(1:n(), each = 3)) %>%
   mutate(N_days_post_id = rep(c(0,180,540), 4)) %>%
   mutate(N_days_post_180 = rep(c(0,0,360), 4))
-# 
-# overlay_data %>%
-#   gt::gt()
 ```
 
 ```{r}
@@ -933,7 +997,10 @@ overlay_data %<>%
 # Slopes data captured upstream in Table: Model Output section
 # The Avg_Weight_kgs values of 104;110 are used as x-y coordinates to place the
 # element text to display the slopes
-slopes %<>%
+slopes <- 
+  data.frame(slopes) %>%
+  mutate(across(c(estimate, post_180_estimate), ~ round(., 2))) %>%
+  mutate(across(c(estimate, post_180_estimate), ~ format(., nsmall = 2))) %>%
   mutate(lab = str_c("Rate of change\n0-6mo: ", estimate, " kg/month\n6-18mo: ", post_180_estimate, " kg/month")) %>%
   mutate(Avg_Weight_kgs = ifelse(group == "Con_nPW", 104, NA),
          Avg_Weight_kgs = ifelse(group == "Con_PW", 110, Avg_Weight_kgs),
@@ -1033,10 +1100,10 @@ observed <-
 ```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
 # This labelling functions was added to change "Int_PW" Int_nPW facet labels
 face_names <- as_labeller(
-  c(`Con_nPW` = "UC nPW",
-    `Con_PW` = "UC PW",
-    `Int_nPW` = "Int nPW",
-    `Int_PW` = "Int PW")
+  c(`Con_nPW` = "C",
+    `Con_PW` = "D",
+    `Int_nPW` = "E",
+    `Int_PW` = "F")
 )
 
 # Create a second data frame with the column names matching those required
@@ -1061,7 +1128,8 @@ overlay_data %>%
                 y = Avg_Weight_kgs, 
                 label = lab,
                 hjust = "left"),
-                size = 2)
+                size = 2) +
+  theme(strip.text.x = element_text(hjust = 0, face = "bold"))
 ```
 
 # Comparison of index and last visits
@@ -1193,15 +1261,50 @@ c("Control", "Intervention") %>%
 
 # Supplementary Table 2. 
 
-Patient demographics and health metrics at the index visit for control and intervention phases for all enrolled patients
+Patient demographics and health metrics at the index visit for control and intervention phases for enrolled patients with at least one follow up in a single phase, but not both phases.
+```{r}
+# Loads mod_data as ee
+load("D:/PATHWEIGH/delivery_20240917/data/mod_data_ee_20240917.RData")
+
+# Filter only visits that are within 18 months of index date
+ee %<>%
+  mutate(slope1 = ifelse(Intervention == "Control", 1, 0),
+         slope2 = ifelse(Intervention == "Intervention", 1, 0)
+         )
+```
+
+```{r}
+# Filter out the patients with at least one follow up in both phases
+ee %<>%
+  filter(!Arb_PersonId %in% pp_mod_data$Arb_PersonId)
+```
+
+Number of patients with at least one follow up visit in a single phase, but not both phases.
+```{r}
+ee %>%
+  group_by(Arb_PersonId) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(Intervention) %>%
+  tbl_summary() %>%
+  as_gt()
+```
+
+
+
 ```{r}
 supp_2 <- 
-  visits_post_id %>%
-  filter(IndexVisit == 1) %>%
+c("Control", "Intervention") %>%
+  purrr::map_df(
+  ~ visits_post_id %>%
+    filter(Arb_PersonId %in% (ee %>% filter(Intervention == .x) %>% pull(Arb_PersonId)),
+           Intervention.factor == .x,
+           IndexVisit == 1)
+  ) %>%
   mutate(Intervention.factor = factor(Intervention.factor, 
                                       levels = c("Control", "Intervention"))) %>%
   mutate(Smoking_Status = fct_na_value_to_level(Smoking_Status, level = "Unknown")) %>%
-  select(Age, Weight_kgs, Sex, Race_Ethnicity, Insurance, BMI,
+  select(Age, Sex, Race_Ethnicity, Insurance, Weight_kgs, BMI,
          Systolic_blood_pressure, Diastolic_blood_pressure,
          A1C:TSH, -`Cystatin C`, EOSS,
          PHQ2, PHQ9, GAD7, Smoking_Status,
@@ -1231,19 +1334,7 @@ supp_2 %>%
 
 # Sensitivity analyses
 
-ITT model using all eligible and enrolled patients
-```{r}
-load("D:/PATHWEIGH/delivery_20240917/data/mod_data_ee_20240917.RData")
-
-ee %<>%
-  filter(N_months_post_id <= 18)
-
-ee %<>%
-  mutate(slope1 = ifelse(Intervention == "Control", 1, 0),
-         slope2 = ifelse(Intervention == "Intervention", 1, 0)
-         )
-```
-
+ITT model using all eligible and enrolled patients with at least one follow up visit in a single phase, but not both phases.
 ```{r}
 # Create binary variables to be able to create the average visit for prediciton
 ee %<>%
@@ -1321,7 +1412,7 @@ tab %<>%
 
 ```{r}
 tab %>%
-  fmt_tab(., "ITT model with at least one follow up in any phase")
+  fmt_tab(., "ITT model with at least one follow up in any phase, but not both phases")
 ```
 
 ```{r}
@@ -1460,7 +1551,11 @@ overlay_data <- overlay_data %>%
 
 ```{r}
 # Slopes data captured upstream in Table: Model Output section
+slopes <- data.frame(slopes) %>% 
+  mutate(across(c(estimate, post_180_estimate), ~ round(., 2))) 
+
 slopes %<>%
+  mutate(across(c(estimate, post_180_estimate), ~ format(., nsmall = 2))) %>%
   mutate(lab = str_c("Rate of change\n0-6mo: ", estimate, " kg/month\n6-18mo: ", post_180_estimate, " kg/month")) %>%
   mutate(Avg_Weight_kgs = ifelse(term == "Control:N_months_post_id", 110, 110),
          N_months_post_id = 1.5,
@@ -1471,8 +1566,8 @@ slopes %<>%
 ylims <- c(100, 113)
 
 face_names <- as_labeller(
-  c(`Control` = "Usual Care",
-    `Intervention` = "Intervention")
+  c(`Control` = "A",
+    `Intervention` = "B")
 )
 
 # Plot of the 2nd draft. Instead of superimposing geom_ribbon(), this version
@@ -1506,5 +1601,6 @@ overlay_data %>%
                 y = Avg_Weight_kgs, 
                 label = lab,
                 hjust = "left"),
-                size = 2)
+                size = 2) +
+  theme(strip.text.x = element_text(hjust = 0, face = "bold"))
 ```
