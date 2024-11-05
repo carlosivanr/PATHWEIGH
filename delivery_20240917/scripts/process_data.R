@@ -330,13 +330,13 @@ invisible(gc())
 # Save datasets ----------------------------------------------------------------
 # can also use a substring on RData to just get the date.
 save(visits,
-  file = here(proj_root_dir, "data", str_c("processed_all_visits_", RData))
+  file = here(proj_root_dir, "data", str_c("all_visits_", RData))
 )
 
 # Can also be referred to as just the EE from the ee_ene data
 save(
   visits_post_id,
-  file = here(proj_root_dir, "data", str_c("processed_visits_post_id_", RData))
+  file = here(proj_root_dir, "data", str_c("visits_post_id_", RData))
 )
 
 save(
