@@ -75,7 +75,9 @@
 # Year 0 March 17, 2020 - March 16, 2021, Baseline
 # Year 1 March 17, 2021 - March 16, 2022, Group 1 crosses over to intervention
 # Year 2 March 17, 2022 - March 16, 2023, Group 2 crosses over to intervention
-# Year 3 March 17, 2023 - March 16, 2024, Group 3 crosses over to intervention
+# Year 3 March 17, 2022 - March 16, 2024, Group 3 crosses over to intervention
+
+# Built with R 4.2.2
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # %% Load Packages -------------------------------------------------------------
@@ -88,40 +90,46 @@ library(openxlsx)
 library(furrr)
 
 # Specify parameters -----------------------------------------------------------
-RData <- "20240917.RData" # Used as an out to write files
-# Set data delivery date as numerical
-data_delivery_date <- 20240917
+RData <- "20240326.RData" # Used as an out to write files
+data_delivery_date <- 20240326
 
 # For the proc_ene script
 date_min <- as.Date("2020-03-17")
 date_max <- as.Date(lubridate::ymd(data_delivery_date))
 
+# *** need to Cut off index date at 03/16/2024. No one after index date is after
+# 3/16/2024
+
+
 # Source sub-scripts -----------------------------------------------------------
 # Loads all subscript functions into the workspace
 
 # Set the path to the emr_data_processing directory to load scripts/functions
-# that are shared along all separate data deliveries
+# that are shared along all separate data delivery dates
 proj_root_dir <- str_c("delivery_", data_delivery_date)
 proj_parent_dir <- str_remove(here(), proj_root_dir)
 emr_dir <- str_c(proj_parent_dir, "/emr_data_processing/")
 
-# Loads the common set of functions for data deliveries 03-22-2023 and beyond
+# Loads the common set of functions for data deliveries from 03-22-2023 and
+# onward in the emr_data_processing directory
 source(str_c(emr_dir, "subscripts/source_subscripts.R"))
 
 # Encounter Table --------------------------------------------------------------
-# Encounter table contains information from the visit including weight values
+# Encounter table contains information from the encounter including weight vals
 # Clean encounter table by changing -999 values in weight, creates smoking
 # variable and removes asterisks from values, among other tasks. See function
 # notes for more information.
 read_pw_csv("encounter")
 encounter <- prep_encounter(encounter)
+
 invisible(gc())
 
 # Prepare Patient Table --------------------------------------------------------
 # Patient table contains demographic information.
-# Recodes sex, race, ethnicity variables and removes asterisks from values
+# recodes sex, race, ethnicity variables and removes asterisks from values
 read_pw_csv("patient")
 patient <- prep_patient(patient)
+
 invisible(gc())
 
 # Create visits data frame  ----------------------------------------------------
@@ -176,9 +184,9 @@ rm(smart)
 visits <- wpv_naweights(visits)
 
 ## Create WPV ------------------------------------------------------------------
-# At this stage there shouldn't be any NAs in any of the WPV_* variables. This
-# section is to ensure that there aren't any NAs, before creating a variable of
-# the sum of WPV_* indicator variables.
+# WPV is a sum of the number of WPV_* variables. Checks for NAs in any of the
+# WPV_* columns before creating the WPV variable since the creation of WPV will
+# be affected by NAs.
 if (visits %>%
       reframe(across(starts_with("WPV_"), is.na)) %>%
       reframe(across(starts_with("WPV_"), sum)) %>%
@@ -203,8 +211,8 @@ visits <- set_index_date(visits)
 # Last visit in control phase --------------------------------------------------
 # Set the last visit in control's weight, from the first visit in the
 # intervention if and only if the first intervention has a weight, otherwise
-# leave as is. Decided on 07/18/2024 to not proceed with this approach. Will
-# cause errors in participant flow diagram if
+# leave as is work with the visits data frame. Decided on 07/18/2024 to not
+# proceed with this approach. Will cause errors in participant flow diagram if
 # implemented. visits <- assign_last_visit_con(visits)
 
 # Create separate EE and ENE datasets ------------------------------------------
@@ -218,7 +226,7 @@ visits <- set_index_date(visits)
 ee <- visits %>%
   filter(
     Enrolled == 1,
-    EncounterDate >= IndexDate,
+    EncounterDate >= IndexDate
   )
 
 ee_ids <- ee$Arb_PersonId
@@ -242,17 +250,23 @@ ee_ene <- bind_rows(ee, ene)
 rm(ee, ene)
 invisible(gc())
 
+
+
 ## First prep the ee_ene data ----
 # Should yield 59 columns
 source(str_c(emr_dir, "subscripts/prep_ee_ene.R"))
 ee_ene <- prep_ee_ene(ee_ene)
+beepr::beep(sound = 2)
 
 ## Then get the labs, procedures, and comorbidities ----
 # Both arguments should be set to TRUE. Prior functionality of setting to FALSE
 # was built in to expedite the creation of the modeling data set. However,
 # project requirement changes to include meds, labs, procedures, etc. in the
 # modeling data rendered this feature obsolete.
+tic()
 source(str_c(emr_dir, "subscripts/proc_ee_ene.R"))
+toc()
+beepr::beep(sound = 2)
 invisible(gc())
 
 ## Temporary code chunk to modify AST & ALT values, will need to be introduced
@@ -264,37 +278,6 @@ ee_ene %<>%
 ## Create the EE variable
 ee_ene %<>%
   mutate(EE = ifelse(Arb_PersonId %in% ee_ids, 1, 0))
-
-# Cutoff index date at 03/16/2024. No one after index date 3/16/2024 should be
-# enrolled.
-if (data_delivery_date == 20240917) {
-  # Only applied to those in the intervention as there are not any patients that
-  # have an enrollment/index date beyond 2024-03-17 in the control phase
-  pt_ids_con <- 
-    ee_ene %>%
-    filter(Intervention.factor == "Control",
-           IndexVisit == 1) %>%
-    select(Arb_PersonId) %>%
-    distinct()
-  
-  # Get the patient ids where index visits on or after 2024-03-17.
-  pt_ids_int <-
-    ee_ene %>%
-    filter(Intervention.factor == "Intervention", 
-           IndexVisit == 1,
-           EncounterDate >= "2024-03-17") %>%
-    select(Arb_PersonId) %>%
-    distinct()
-  
-  # Filter pt_ids_int
-  pt_ids_int %<>%
-    filter(!Arb_PersonId %in% pt_ids_con$Arb_PersonId)
-
-  # Remove the visits from those enrolled after the cutoff date
-  ee_ene <- ee_ene %>%
-    filter(!Arb_PersonId %in% pt_ids_int$Arb_PersonId)
-  
-}
 
 ## Break ee_ene data frame apart into EE (visits_post_id) and ENE ----
 # visits_post_id naming maintained to work with legacy and downstream processing
@@ -322,9 +305,8 @@ create_enrollment_table(visits_post_id)
 
 # *** requires processed labs, procedures, and comorbidities
 # *** Currently uses visits post id, but it may be worth using mod_data
-# *** Currently not working
 # if (data.frame(grep("O2CPAPBIPAP", (names(visits_post_id)))) %>% nrow() > 0) {
-#   create_safety_officer_table(visits_post_id, date_2 = date_max)
+#   create_safety_officer_table(visits_post_id, date_2 = date_min)
 # }
 
 # Make mod_data ----------------------------------------------------------------
@@ -341,31 +323,20 @@ mod_data <- ee_ene %>% make_mod_data(., data_delivery_date)
 source(str_c(emr_dir, "subscripts/make_pp_data.R"))
 invisible(gc())
 
-# Run the participant flow diagram script --------------------------------------
-pp_mod_data %>% 
-  group_by(Arb_PersonId) %>% 
-  slice_head() %>% 
-  ungroup() %>% 
-  select(Cohort) %>% 
-  tbl_summary()
-
 # Save datasets ----------------------------------------------------------------
 # can also use a substring on RData to just get the date.
 save(visits,
-  file = here(proj_root_dir, "data", str_c("all_visits_", RData))
+     file = here(proj_root_dir, "data", str_c("processed_all_visits_", RData))
 )
 
-# Can also be referred to as just the EE from the ee_ene data
 save(
   visits_post_id,
-  file = here(proj_root_dir, "data", str_c("visits_post_id_", RData))
+  file = here(proj_root_dir, "data", str_c("processed_visits_post_id_", RData))
 )
 
 save(
   ee_ene,
   file = here(proj_root_dir, "data", str_c("ee_ene_", RData))
 )
-
-beepr::beep(sound = 2)
 
 # END OF SCRIPT ----------------------------------------------------------------

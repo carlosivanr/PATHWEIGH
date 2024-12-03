@@ -18,7 +18,7 @@ library(magrittr, include.only = "%<>%")
 ```
 
 ```{r}
-# When set to TRUE, behavior is perform 1,000 simulations 
+# When set to TRUE, behavior is perfrom 1,000 simulations 
 # for bootstrapping the SEs to calculate prediction 
 # intervals 
 run_boot = FALSE
@@ -640,16 +640,6 @@ obs_pred <-
   select(Arb_PersonId, N_months_post_id, observed, predicted, Intervention)
 ```
 
-
-```{r, eval = FALSE}
-# ********** PROBLEM WITH PREDICTIONS COMING UP WITH NAs ***********************
-predicted <- predict(lmer_mod_bin, pp_mod_data, re.form = NA, type = "response")
-obs_pred <- bind_cols(pp_mod_data, data.frame(predicted)) %>%
-  mutate(observed = Weight_dv)
-
-obs_pred %>% filter(is.na(predicted))
-```
-
 ### All panels display predicted values from the ITT model.
 ```{r}
 # Create the overlay data by averaging across all visits in each phase of the
@@ -948,7 +938,7 @@ by = "group"
 ```
 
 ### Figure: All panels display predicted values from 4-slope model
-Compares two groups in both phases. nPW group never received any of the PATHWEIGH tools during any of their intervention visits. The PW group received at least one PATHWEIGH tool in at least one visit during the intervention phase.
+Compares two groups in both phases. nPW group never received any of the PATHWEIGH tools during any of their intervention visits. The PW group received at least one PATHWEIGH tool in at least one visit during the intervention phase. C. Control no pathweigh; D. Control pathweigh; E. Intervention No pathweigh; F. Intervention pathweigh.
 
 ```{r}
 # V1 Code
@@ -1112,7 +1102,7 @@ observed <-
 
 
 ```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
-# This labelling functions was added to change "Int_PW" Int_nPW facet labels
+# This labelling function was added to change "Int_PW" Int_nPW facet labels
 face_names <- as_labeller(
   c(`Con_nPW` = "C",
     `Con_PW` = "D",
@@ -1298,28 +1288,16 @@ ee %<>%
 # Eleigible and enrolled must have at least one follow up
 ```
 
-Number of patients with at least one follow up visit in a single phase.
+Number of patients with at least one follow up visit in a single phase. Values are not mutually exclusive because the same patient could be counted twice, once for each phase.
 ```{r}
-# ee %>%
-#   group_by(Arb_PersonId) %>%
-#   slice_head() %>%
-#   ungroup() %>%
-#   select(Intervention) %>%
-#   tbl_summary() %>%
-#   as_gt()
-# 
-# ee %>% filter(Intervention == "Intervention") %>% select(Arb_PersonId) %>% distinct() %>% nrow()
-
 ee %>%
-  group_by(Intervention, Arb_PersonId) %>%
+  group_by(Arb_PersonId) %>%
   slice_head() %>%
   ungroup() %>%
   select(Intervention) %>%
   tbl_summary() %>%
   as_gt()
 ```
-
-\newpage
 
 ```{r}
 supp_2 <- 
@@ -1363,7 +1341,7 @@ supp_2 %>%
 
 # Sensitivity analyses
 
-ITT model using all eligible and enrolled patients with at least one follow up visit in a single phase.
+ITT model using all eligible and enrolled patients with at least one follow up visit in a single phase, but not both phases.
 ```{r}
 # Create binary variables to be able to create the average visit for prediciton
 ee %<>%
@@ -1441,7 +1419,7 @@ tab %<>%
 
 ```{r}
 tab %>%
-  fmt_tab(., "ITT model with at least one follow up in any phase.")
+  fmt_tab(., "ITT model with at least one follow up in any phase, but not both phases")
 ```
 
 ```{r}

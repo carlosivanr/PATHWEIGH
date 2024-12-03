@@ -27,8 +27,15 @@ proc_labs_meds <- function(data) {
   # The older version of meds, captures the frequencies of each AOM, whereas
   # the newer one is just a binary whether or not patient had AOM Rx within
   # phase, and counts of Rx
-  # source(str_c(emr_dir, "subscripts/medications.R")) # Older version of meds
-  source(str_c(emr_dir, "subscripts/capture_medications.R")) # Updated 10-2024
+  
+  if (data_delivery_date == 20240326) {
+    source(str_c(emr_dir, "subscripts/medications_old.R")) # Older version of meds
+    # There is also an intermediary version medications.R, that is somewhat an 
+    # in-between the old version and the latest version (capture_medications.R)
+  } else {
+    source(str_c(emr_dir, "subscripts/capture_medications.R")) # Latest version
+  }
+  
   # Create data subsets --------------------------------------------------------
   ## 1. index visits in control phase ----
   # Can be processed normally without modifying the index date

@@ -8,7 +8,6 @@
 # This script was drafted to import the compass data delivery tables needed to
 # create the data for the economic analysis.
 
-# Built with R 4.2.2
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # Load Packages ----------------------------------------------------------------

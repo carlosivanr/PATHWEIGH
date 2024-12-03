@@ -38,7 +38,7 @@ if (file.exists(data_file)) {
   # allows to load proc_ee_ene.RData as processed_ee_ene in the workspace.
 
   # File loading function that will allow loading a file and assign it to a
-  # different name to in the global environment
+  # different name in the global environment
   loadRData <- function(file_name) {
     #loads an RData file, and returns it
     load(file_name)

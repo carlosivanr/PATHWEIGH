@@ -76,6 +76,8 @@
 # Year 1 March 17, 2021 - March 16, 2022, Group 1 crosses over to intervention
 # Year 2 March 17, 2022 - March 16, 2023, Group 2 crosses over to intervention
 # Year 3 March 17, 2023 - March 16, 2024, Group 3 crosses over to intervention
+
+# Built with R 4.2.2
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # %% Load Packages -------------------------------------------------------------
@@ -88,9 +90,9 @@ library(openxlsx)
 library(furrr)
 
 # Specify parameters -----------------------------------------------------------
-RData <- "20240917.RData" # Used as an out to write files
+RData <- "20240326.RData" # Used as an out to write files
 # Set data delivery date as numerical
-data_delivery_date <- 20240917
+data_delivery_date <- 20240326
 
 # For the proc_ene script
 date_min <- as.Date("2020-03-17")
@@ -267,33 +269,17 @@ ee_ene %<>%
 
 # Cutoff index date at 03/16/2024. No one after index date 3/16/2024 should be
 # enrolled.
-if (data_delivery_date == 20240917) {
-  # Only applied to those in the intervention as there are not any patients that
-  # have an enrollment/index date beyond 2024-03-17 in the control phase
-  pt_ids_con <- 
+if (data_delivery_date == 20240326) {
+  # Get the ids that are enrolled past the cut off
+  ids <-
     ee_ene %>%
-    filter(Intervention.factor == "Control",
-           IndexVisit == 1) %>%
-    select(Arb_PersonId) %>%
-    distinct()
-  
-  # Get the patient ids where index visits on or after 2024-03-17.
-  pt_ids_int <-
-    ee_ene %>%
-    filter(Intervention.factor == "Intervention", 
-           IndexVisit == 1,
+    filter(IndexVisit == 1,
            EncounterDate >= "2024-03-17") %>%
-    select(Arb_PersonId) %>%
-    distinct()
-  
-  # Filter pt_ids_int
-  pt_ids_int %<>%
-    filter(!Arb_PersonId %in% pt_ids_con$Arb_PersonId)
+    pull(Arb_PersonId)
 
   # Remove the visits from those enrolled after the cutoff date
   ee_ene <- ee_ene %>%
-    filter(!Arb_PersonId %in% pt_ids_int$Arb_PersonId)
-  
+    filter(!Arb_PersonId %in% ids)
 }
 
 ## Break ee_ene data frame apart into EE (visits_post_id) and ENE ----
@@ -340,14 +326,6 @@ mod_data <- ee_ene %>% make_mod_data(., data_delivery_date)
 # The only input is delivery from workspace to write the files
 source(str_c(emr_dir, "subscripts/make_pp_data.R"))
 invisible(gc())
-
-# Run the participant flow diagram script --------------------------------------
-pp_mod_data %>% 
-  group_by(Arb_PersonId) %>% 
-  slice_head() %>% 
-  ungroup() %>% 
-  select(Cohort) %>% 
-  tbl_summary()
 
 # Save datasets ----------------------------------------------------------------
 # can also use a substring on RData to just get the date.

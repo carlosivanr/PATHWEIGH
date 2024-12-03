@@ -58,7 +58,9 @@ prep_ee_ene <- function(data) {
         EncounterDate < "2021-03-17" ~ "Year0",
         EncounterDate >= "2021-03-17" & EncounterDate < "2022-03-17" ~ "Year1",
         EncounterDate >= "2022-03-17" & EncounterDate < "2023-03-17" ~ "Year2",
-        EncounterDate >= "2023-03-17" & EncounterDate < "2024-03-17" ~ "Year3"
+        EncounterDate >= "2023-03-17" & EncounterDate < "2024-03-17" ~ "Year3",
+        EncounterDate >= "2024-03-17" & EncounterDate < "2025-03-17" ~ "Year4",
+        EncounterDate >= "2025-03-17" & EncounterDate < "2026-03-17" ~ "Year5"
       ),
       Month_Day = format(EncounterDate, "%m-%d"),
       Quarter = case_when(

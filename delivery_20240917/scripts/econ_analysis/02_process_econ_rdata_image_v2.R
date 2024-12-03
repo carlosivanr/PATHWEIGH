@@ -156,7 +156,7 @@ mat <- data.frame(matrix(NA, dim(wpv_visits)[1], length(either_code)))
 # Set the names of mat according to the codes of interest
 names(mat) <- either_code
 
-# Mat a 2nd matrix for the .source columns
+# Make a 2nd matrix for the .source columns
 mat2 <- data.frame(matrix(NA, dim(wpv_visits)[1], length(either_code)))
 
 names(mat2) <- str_c(either_code, ".source")
