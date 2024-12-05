@@ -13,16 +13,17 @@
 # phase
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-
-
 make_mod_data <- function(data, delivery) {
 
   # Initial data filtering -----------------------------------------------------
   # Remove any visits where sex is unknown because the model could fail due to
   # sparseness, and filters out any visits that were censored
+  # Drop na weights to get the correct number of visits per patient when
+  # creating con_ids_gt1_visits and int_ids_gt1_visits
   data %<>%
     filter(Sex != "Unknown") %>%
-    filter(Censored == 0)
+    filter(Censored == 0) %>%
+    drop_na(Weight_kgs)
 
   # Filter the data to cap the number of months post id
   data %<>%
@@ -311,12 +312,12 @@ make_mod_data <- function(data, delivery) {
   
   # mod_data contains both ee and ene visits
   mod_data <- mod_data %>% filter(IndexVisit == 0)
-  
+
   # ee only contains ee visits
   ee <- ee %>% filter(IndexVisit == 0)
 
   # Write out the data set -----------------------------------------------------
-  # Save mod_data to the data directory on the network drive
+  # Save mod_data to the data directory
   save(mod_data,
        file = here(proj_root_dir, "data", str_c("mod_data_full_", RData)))
 
@@ -332,5 +333,4 @@ make_mod_data <- function(data, delivery) {
   names(mod_data) <- c("mod_data", "ee", "mod_data_w_ind")
 
   return(mod_data)
-
 }
