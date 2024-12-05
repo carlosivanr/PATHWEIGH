@@ -37,17 +37,11 @@ if (file.exists(data_file)) {
   # naming confusiong with proc_ee_ene() function. The following function
   # allows to load proc_ee_ene.RData as processed_ee_ene in the workspace.
 
-  # File loading function that will allow loading a file and assign it to a
-  # different name in the global environment
-  loadRData <- function(file_name) {
-    #loads an RData file, and returns it
-    load(file_name)
-    get(ls()[ls() != "file_name"])
-  }
+  source("D:/PATHWEIGH/emr_data_processing/functions/load_rdata.R")
 
   # Load the processed ee_ene, that already has labs, procedures, and
   # comorbidities to avoid capturing them again when the script is run
-  processed_ee_ene <- loadRData(data_file)
+  processed_ee_ene <- load_rdata(data_file)
 
   # If all of the encounters in ee_ene are in processed_ee_ene, then merge in
   # the labs, procedures, referrals, eoss, and comorbidities.
@@ -106,5 +100,4 @@ if (file.exists(data_file)) {
                    str_c("processed_ee_ene_", RData)))
 
   rm(processed_ee_ene)
-
 }
