@@ -1,0 +1,967 @@
+---
+title: "Aim 1B"
+
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+
+execute: 
+  echo: false
+---
+
+```{r}
+
+```
+```{r, message = FALSE}
+# PART 2. %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# Carlos Rodriguez, PhD. CU Anschutz Dept. of Family Medicine
+# After Imputed values from SAS are saved as .csv, and imported back into R,
+#  they need to be merged into the modeling data set.
+
+# INPUTS: 
+# 1. pp_data for the 9,358 patients from the Aim1A analyses
+# 2. Two data sets of the imputed weight values, one each for 
+#    control/intervention
+# END HEADER %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+```
+
+```{r}
+# Load libraries --------------------------------------------------------------
+pacman::p_load(tidyverse,
+               geepack,
+               gtsummary)
+library(magrittr, include = "%<>%")
+```
+
+```{r, message = FALSE}
+# Read in the ee data ---------------------------------------------------------
+load("D:/PATHWEIGH/delivery_20240917/data/pp_data_20240917.RData")
+
+# Read in the imputed data ----------------------------------------------------
+# read in imputation data control
+con <- read_csv("D:/PATHWEIGH/delivery_20240917/data/imputation_control.csv") %>%
+  mutate(Intervention = "Control")
+
+# read in impuation data intervention
+int <- read_csv("D:/PATHWEIGH/delivery_20240917/data/imputation_intervention.csv") %>%
+  mutate(Intervention = "Intervention")
+
+# Stack the two data sets together
+imputed_weights <- bind_rows(con, int)
+
+# Remove the first 3 characters from id column, rename as Arb_PersonId and then
+# convert to factor to be able to merge data. Remove the id column since it
+# will no longer be used
+imputed_weights %<>%
+  mutate(Arb_PersonId = str_replace(id, "ID ", "")) %>%
+  mutate(Arb_PersonId = factor(Arb_PersonId)) %>%
+  select(-id)
+                   
+# Create a data frame of the observed weights for 6, 12, and 18 months if
+# available. These will be used in a series of coalescing function calls
+# to retain the observed weight in cases where it is available instead
+# of the imputed weight.
+observed_weights <- pp_data %>%
+  filter(N_months_post_id == 6 |
+         N_months_post_id == 12 |
+         N_months_post_id == 18) %>%
+  group_by(Arb_PersonId, Intervention, N_months_post_id) %>%
+  arrange(EncounterDate) %>%
+  slice_head() %>% # Grab one row for each 6, 12, and 18 month values when there are more than 1
+  ungroup() %>%
+  select(Arb_PersonId, Intervention, N_months_post_id, Weight_dv) %>%
+  arrange(N_months_post_id) %>%
+  pivot_wider(., names_from = N_months_post_id, names_prefix = "weight_observed_", values_from = Weight_dv)
+```
+
+```{r}
+#| eval: false
+# Do any patients have more than one 6month, 12month, or 18month value?
+# 365 people have more than one 6 month weight value
+# 257 people have more than one 12 month weight value 
+# 128 people have more than one 18 month weight value
+c(6, 12, 18) %>%
+    map(
+        ~ pp_data %>%
+            filter(N_months_post_id == .x) %>%
+            group_by(Arb_PersonId, Intervention) %>%
+            count() %>%
+            filter(n > 1) %>%
+            nrow()
+    )
+```
+
+```{r}
+# Create a data frame where the observed weights are merged into the imputed weights.
+# Because it's possible for a single patient to not have a 6, 12, or 18 month weight,
+# the observed weights data frame will be smaller because those patients won't be
+# represented in this dataframe. When merging is achieved, thes patients will show
+# up as rows with missing values for the observed 6m, 12m, and 18m weight.
+weight_loss <- 
+  left_join(imputed_weights, 
+            observed_weights, 
+            by = c("Arb_PersonId", "Intervention")) 
+```
+
+```{r}
+# what does the distribution of the difference between the observed and imputed weight look like?
+weight_loss %<>%
+    mutate(diff6 = weight_observed_6 - weight_imputed_6) %>%
+    mutate(diff12 = weight_observed_12 - weight_imputed_12) %>%
+    mutate(diff18 = weight_observed_18 - weight_imputed_18) %>%
+    select(Arb_PersonId, Intervention, everything())
+```
+
+# Distribution of the difference between observed weight and imputed weight at 6mo for those that had an observed weight
+```{r, warning = FALSE, message = FALSE}
+# The number of imputed weights at 6 months
+weight_loss %>%
+    select(diff6, Intervention) %>%
+    drop_na(diff6) %>%
+    tbl_summary(by = Intervention,
+    statistic = list(all_continuous() ~ "{mean} ({sd}; {min}; {max}, {p25}, {p75})"),
+    digits = everything() ~ c(2,2))
+
+weight_loss %>%
+    select(diff6, Intervention) %>%
+    drop_na(diff6) %>%
+    ggplot(., aes(x = diff6)) +
+    geom_histogram()
+```
+
+
+# Distribution of the difference between observed weight and imputed weight at 12mo for those that had an observed weight
+```{r, warning = FALSE, message = FALSE}
+# The number of imputed weights at 12 months
+weight_loss %>%
+    select(diff12, Intervention) %>%
+    drop_na(diff12) %>%
+    tbl_summary(by = Intervention,
+    statistic = list(all_continuous() ~ "{mean} ({sd}; {min}; {max}, {p25}, {p75})"),
+    digits = everything() ~ c(2,2))
+
+weight_loss %>%
+    select(diff12, Intervention) %>%
+    drop_na(diff12) %>%
+    ggplot(., aes(x = diff12)) +
+    geom_histogram()
+```
+
+# Distribution of the difference between observed weight and imputed weight at 18mo for those that had an observed weight
+```{r, warning = FALSE, message = FALSE}
+weight_loss %>%
+    select(diff18, Intervention) %>%
+    drop_na(diff18) %>%
+    tbl_summary(by = Intervention,
+    statistic = list(all_continuous() ~ "{mean} ({sd}; {min}; {max}, {p25}, {p75})"),
+    digits = everything() ~ c(2,2))
+
+weight_loss %>%
+    select(diff18, Intervention) %>%
+    drop_na(diff18) %>%
+    ggplot(., aes(x = diff18)) +
+    geom_histogram()
+```
+
+# Number of observed visits with a weight value at 6months, 12months, and 18months in each phase
+```{r}
+weight_loss %>%
+    mutate(across(weight_observed_6:weight_observed_18, ~ ifelse(is.na(.x), 0, 1))) %>%
+    select(Intervention, weight_observed_6:weight_observed_18) %>%
+    tbl_summary(by = Intervention)
+```
+
+```{r}
+weight_loss <- weight_loss %>%
+  mutate(weight_6 = coalesce(weight_observed_6, weight_imputed_6),
+         weight_12 = coalesce(weight_observed_12, weight_imputed_12),
+         weight_18 = coalesce(weight_observed_18, weight_imputed_18)) %>%
+  mutate(weight_loss_12 = ifelse(weight_12 < weight_6, 1, 0),
+         weight_loss_18 = ifelse(weight_18 < weight_12, 1, 0))
+
+
+# Merge in the coalesced 12m and 18m indicator variables ----------------------
+# These are the binary indicators to be used as outcomes for the logistic
+# regression models.
+pp_data %<>%
+  left_join(weight_loss %>% select(Arb_PersonId, Intervention, weight_loss_12, weight_loss_18),
+            by = c("Arb_PersonId", "Intervention"))
+
+
+# Create binary indicator variables for the age, sex, race, and year at index
+# categorical variables to be used in modeling.
+pp_data %<>%
+  mutate(age_lt_45 = ifelse(Age_cat == "<=45", 1, 0),
+         age_45_to_60 = ifelse(Age_cat == "45-60", 1, 0),
+         age_gt_60 = ifelse(Age_cat == ">60", 1, 0),
+         sex_m = ifelse(Sex == "Male", 1, 0),
+         sex_f = ifelse(Sex == "Female", 1, 0),
+         reth_nhw = ifelse(Race_Ethnicity == "Non-Hispanic White", 1, 0),
+         reth_his = ifelse(Race_Ethnicity == "Hispanic or Latino", 1, 0),
+         reth_blk = ifelse(Race_Ethnicity == "Black or African American", 1, 0),
+         reth_asn = ifelse(Race_Ethnicity == "Asian", 1, 0),
+         reth_oth = ifelse(Race_Ethnicity == "Other", 1, 0),
+         reth_ukn = ifelse(Race_Ethnicity == "Unknown", 1, 0),
+         year_at_ind0 = ifelse(Year_at_ind == "Year0", 1, 0),
+         year_at_ind1 = ifelse(Year_at_ind == "Year1", 1, 0),
+         year_at_ind2 = ifelse(Year_at_ind == "Year2", 1, 0),
+         year_at_ind3 = ifelse(Year_at_ind == "Year3", 1, 0))
+
+# Create a data set with only the index visits, to use as the modeling data set
+# since it will contain one row per patient in each phase
+mod_data <- pp_data %>% filter(IndexVisit == 1)
+
+```
+
+
+# Logistic regression model
+- dv: weight loss at 12 months
+```{r}
+#| echo: true
+model.12 <- 
+  geeglm(weight_loss_12 ~
+
+  # age
+  age_45_to_60 + age_gt_60 +
+
+  # sex
+  sex_m +
+
+  # race ethnicity
+  reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+  # year at index
+  year_at_ind1 + year_at_ind2 + year_at_ind3 +
+
+  # Weight at baseline
+  Weight_bl + Intervention,
+
+  # Clustering
+  id = Arb_PersonId,
+
+  family = "binomial",
+
+  # Input data frame
+  data = mod_data
+  )
+```
+
+<!-- ## Logistic regression parameter estimates (unexponentiated) -->
+```{r}
+#| eval: false
+broom::tidy(model.12) %>%
+    gt::gt()
+```
+
+## Logistic regression parameter estimates (exponentiated)
+```{r}
+#| eval: false
+broom::tidy(model.12, exp = TRUE) %>%
+    gt::gt()
+```
+
+```{r}
+# FUNCTION
+# Obtain Wald CIs in odds ratios to match SAS output
+# requires this function, because gt_summary  uses the
+# confint function. To match the results in SAS, the
+# confint.default() function
+tidy_or <- function(x, exponentiate = TRUE, conf.level = 0.95, ...) {
+  dplyr::bind_cols(
+    broom::tidy(x, exp = exponentiate, conf.int = FALSE),
+    # calculate the confidence intervals, and save them in a tibble
+    exp(confint.default(x)) |> 
+      dplyr::as_tibble() |> 
+      rlang::set_names(c("conf.low", "conf.high"))
+  )
+}
+```
+
+```{r}
+# FUNCTION
+gt_tab <- function(model){
+  tbl_regression(model,
+               exponentiate = TRUE,
+               tidy_fun = tidy_or,
+               estimate_fun = purrr::partial(style_ratio, digits = 3))
+}
+```
+
+```{r}
+gt_tab(model.12)
+```
+
+
+<!-- # 4 Groups
+Demographics stratified by 4 groups:
+1. weight loss in both
+2. weight loss in only one
+    -2.1 only in control 
+    -2.2 only in intervention
+3. weight loss in neither
+4. table 1 and table 2 from aim 1A by 4 groups
+    - if sample size allows, stratify logistic reg models
+    - 4 separate ORs -->
+
+```{r}
+# View the data to categorize people
+# 1. Weight loss in both control and intervention
+# 2. Weight loss in only one phase
+# 3. Weight loss in control but not intervention
+# 4. Weight loss in intervention but not control
+
+# mod_data %>%
+#     arrange(Arb_PersonId) %>%
+#     select(Arb_PersonId, Intervention, Arb_EncounterId, Weight_kgs, weight_loss_12)
+
+# 1. Can be defined by filtering weight_loss_12 == 1
+#    and then grouping, summing the value, and then 
+#    pulling values where the sum == 2
+
+# 2. Can be defined as those with n_distinct == 1
+# 2. Can also be defined as the opposite of 1
+
+# 3. Filtering where Arb_PersonId is in #2. then filter
+# to Intervention == Control, pull Arb_PersonId, and
+# use that id vector to define the variable
+
+# 4. Filtering where Arb_PersonId is in #2. then filter
+# to Intervention == Intervention, pull Arb_PersonId, and
+# use that id vector to define the variable
+
+# 1. wtloss_two_phases vs wtloss_one_phase
+wtloss_two_phases <- mod_data %>%
+    filter(weight_loss_12 == 1) %>%
+    group_by(Arb_PersonId) %>%
+    summarise(phases = sum(weight_loss_12)) %>%
+    filter(phases == 2) %>%
+    pull(Arb_PersonId)
+
+# Create the wtloss_two_phases variable
+mod_data %<>%
+    mutate(wtloss_two_phases = ifelse(Arb_PersonId %in% wtloss_two_phases, 1, 0))
+
+# Count how many people lost 0 weight in both phases
+# Can be defined by filtering rows where weight loss is 0
+# then group_by Arb_PersonId and count the number of rows
+# if the number of rows is 2, one for int and one for con,
+# then that person did not lose any weight in any phase
+wtloss_no_phases <- mod_data %>%
+    filter(weight_loss_12 == 0) %>%
+    group_by(Arb_PersonId) %>%
+    count() %>%
+    filter(n == 2) %>%
+    pull(Arb_PersonId)
+```
+
+
+
+# Number of patients by phase of weight loss for 12m timepoint
+- 3,618 patients lost weight in both phases
+- 4,445 patients lost weight in only one phase
+    - control only: 2,006
+    - intervention only: 2,439
+- 1,295 patients did not lose any weight in any phase.
+
+```{r}
+# Should be 2,006 and 2,439
+mod_data_tab <-
+    mod_data %>%
+    mutate(group = ifelse(wtloss_two_phases == 1, "loss_both", NA)) %>%
+    mutate(group = ifelse(weight_loss_12 == 1 & wtloss_two_phases == 0 & Intervention == "Control", "loss_con", group)) %>%
+    mutate(group = ifelse(weight_loss_12 == 1 & wtloss_two_phases == 0 & Intervention == "Intervention", "loss_int", group)) %>%
+    mutate(group = ifelse(Arb_PersonId %in% wtloss_no_phases, "no_loss", group)) %>%
+    group_by(Arb_PersonId) %>%
+    fill(group, .direction = c("updown")) %>%
+    slice_head() %>%
+    ungroup() %>%
+    mutate(group = factor(group, levels = c("loss_both", "no_loss", "loss_con", "loss_int")))
+
+```
+
+```{r}
+mod_data_tab %>%
+    select(group) %>%
+    tbl_summary()
+```
+
+```{r}
+# mod_data %>%
+#     select(wtloss_two_phases, Intervention) %>%
+#     tbl_summary(by = Intervention)
+```
+
+<!-- # Comparison of demographics for those that lost weight in both phases at each index visit -->
+```{r}
+#| eval: false
+
+# Int vs Con in those with weight loss in two phases.
+mod_data_tab %>%
+    filter(wtloss_two_phases == 1) %>%
+    select(Age, Race_Ethnicity, Insurance, Intervention) %>%
+    tbl_summary(by = Intervention) %>%
+    add_p()
+```
+
+<!-- # Comparison of demographics for those that lost weight in one phase only -->
+
+```{r}
+#| eval: false
+# Int vs Con in those with weight loss in one phase only
+mod_data_tab %>%
+    filter(wtloss_two_phases == 0) %>%
+    filter(weight_loss_12 == 1) %>%
+    select(Age, Race_Ethnicity, Insurance, Intervention) %>%
+    tbl_summary(by = Intervention) %>%
+    add_p()
+```
+
+# Comparisons of those that lost weight in both phases, those that lost weight in control only, those that lost weight in intervention only, and those that did not lose any weight for the 12m timepoint.
+
+
+```{r}
+mod_data_tab %>%
+    select(Age, Race_Ethnicity, Insurance, group) %>%
+    tbl_summary(by = group) %>%
+    add_overall() %>%
+    as_gt()
+```
+
+
+```{r}
+#| eval: false
+# people that lost weight in only one phase
+mod_data_tab %>%
+    filter(wtloss_two_phases == 0, weight_loss_12 == 1) %>%
+    select(Age, Race_Ethnicity, Insurance, Intervention) %>%
+    tbl_summary(by = "Intervention") 
+```
+
+
+<!-- # 7,035 patients lost weight in only one phase
+- 3,734 in Control
+- 3,301 in Intervention -->
+
+```{r}
+#| eval: false
+
+mod_data_tab %>%
+    filter(wtloss_two_phases == 0, weight_loss_12 == 0) %>%
+    select(Age, Race_Ethnicity, Insurance, Intervention) %>%
+    tbl_summary(by = "Intervention") %>%
+    add_overall()
+``` 
+
+
+```{r}
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# BEGIN WORKING WITH VISITS POST ID FOR TABLE 2
+
+proj_root <- "D:/PATHWEIGH/"
+
+# Set the data delivery date to the appropriate data set
+delivery <- "20240917"
+
+# Load visits_post_id
+load(str_c(proj_root, "delivery_", delivery, "/data/visits_post_id_", delivery, ".Rdata"))
+
+# Process visits_post_id for displaying tables
+visits_post_id <- 
+  visits_post_id %>%
+  mutate(across(PHQ2:GAD7, ~ as.numeric(.)),
+            EOSS = fct_na_value_to_level(factor(EOSS, levels = c("0", "1", "2", "3")), level = "Unknown"))
+
+# NA the outlier with a BMI of 4.
+visits_post_id %<>%
+  mutate(BMI = ifelse(Arb_EncounterId == 170254415001, NA, BMI))
+```
+
+```{r}
+# Create a copy of visits post id to use in tables
+tab_data <- visits_post_id
+
+# Modify tab data for table 1
+tab_data %<>%
+    mutate(Intervention.factor = factor(Intervention.factor, levels = c("Control", "Intervention"))) %>%
+    mutate(Smoking_Status = fct_na_value_to_level(Smoking_Status, level = "Unknown")) %>%
+    mutate(PHQ2_complete = ifelse(is.na(PHQ2), 0, 1),
+         PHQ2_gt_0 = ifelse(PHQ2 > 0, 1, 0),
+         PHQ9_complete = ifelse(is.na(PHQ9), 0, 1),
+         GAD7_complete = ifelse(is.na(GAD7), 0, 1))
+
+# Modify tabe data for the first part of table 2
+tab_data %<>%
+    mutate(
+        WPV_vtype = ifelse(WPV_IP == 1 | WPV_TH == 1, 1, 0), # Combine WPV_IP and WPV_TH
+        Intervention.factor = factor(Intervention.factor, levels = c("Control", "Intervention"))) %>%
+    mutate(WPV_WMQ = ifelse(WPV_WMQ == 1 | WPV_PW_flow == 1, 1, 0)) %>%
+    mutate(WPV_OBHPI = factor(WPV_OBHPI, levels = c("0", "1")))
+```
+
+```{r}
+# Make the WPV_* variables time invariant for tables
+# Solution with fill() did not work, needed vec_fill_missing().
+tab_data %<>%
+    # select(Arb_PersonId, Arb_EncounterId, Intervention, EncounterDate, starts_with("WPV_")) %>%
+    # arrange(Arb_PersonId, EncounterDate)
+    # filter(Arb_PersonId %in% mod_data$Arb_PersonId) %>%
+    mutate(across(starts_with("WPV_"), ~ ifelse(.x == 0, NA, .x))) %>%
+    group_by(Arb_PersonId) %>%
+    mutate(across(starts_with("WPV_"), ~ vctrs::vec_fill_missing(.x, direction = "updown"))) %>%
+    # fill(WPV_CC, .direction = "updown") %>%
+    ungroup() %>%
+    mutate(across(starts_with("WPV_"), ~ if_else(is.na(.x), 0, .x))) 
+    # %>%
+    # pull(WPV_CC) %>%
+    # table(., useNA = 'ifany')
+
+# Make Ref_*, Bariatric Surgery, and N_Med_AOM as time invariant
+tab_data %<>%
+    mutate(across(starts_with("Ref_"), ~ ifelse(.x == 0, NA, .x))) %>%
+    mutate(across(starts_with("BariatricSurgery"), ~ ifelse(.x == 0, NA, .x))) %>%
+    mutate(across(starts_with("N_Meds_AOM"), ~ ifelse(.x >= 1, 1, NA))) %>%
+    group_by(Arb_PersonId) %>%
+    mutate(across(starts_with("Ref_"), ~ vctrs::vec_fill_missing(.x, direction = "updown"))) %>%
+    mutate(across(starts_with("BariatricSurgery"), ~ vctrs::vec_fill_missing(.x, direction = "updown"))) %>%
+    mutate(across(starts_with("N_Meds_AOM"), ~ vctrs::vec_fill_missing(.x, direction = "updown"))) %>%
+    ungroup() %>%
+    mutate(across(starts_with("Ref_"), ~ if_else(is.na(.x), 0, .x))) %>%
+    mutate(across(starts_with("BariatricSurgery"), ~ if_else(is.na(.x), 0, .x))) %>%
+    mutate(across(starts_with("N_Meds_AOM"), ~ if_else(is.na(.x), 0, .x))) #%>%
+    # pull(Ref_BariatricSurgery) %>%
+    # table(., useNA = "ifany")
+
+
+```
+
+```{r}
+# Create tabe data, by filtering out all of the visits in the mod_data only
+tab_data %<>%
+    filter(Arb_EncounterId %in% mod_data$Arb_EncounterId)
+```
+
+
+```{r}
+# Merge in the group (wt loss in both, none, control only or intervention only)
+# categorical variable
+tab_data <- left_join(tab_data,
+          (mod_data_tab %>% select(Arb_EncounterId, group)),
+          by = "Arb_EncounterId")
+```
+
+# Table 1.
+```{r}
+# table  1: Patient demographics at index for those with weight loss in both
+# phases, no weight loss, loss in control only, and loss in intervention only
+tab_data %>%
+    select(Age, Sex, Race_Ethnicity, Insurance, Weight_kgs, BMI,
+        Systolic_blood_pressure, Diastolic_blood_pressure,
+        A1C:TSH, EOSS,
+        PHQ2, PHQ2_complete, PHQ2_gt_0, PHQ9, PHQ9_complete, GAD7, GAD7_complete, Smoking_Status, group) %>%
+    tbl_summary(by = group,
+                type = list(c(PHQ2, PHQ9, GAD7) ~ 'continuous')) %>%
+    add_overall()
+```
+
+# Table 2.
+```{r}
+# tab 2a
+tab_data %>%
+    # select(WPV_ICD)
+    # mutate()
+    select(
+        WPV_ICD,
+        WPV_CC,
+        WPV_OBHPI,
+        WPV_WMQ,
+        WPV_vtype,
+        WPV_smart,
+        group) %>%
+    mutate(WPV_OBHPI = factor(WPV_OBHPI, levels = c("1", "0"))) %>%
+    tbl_summary(by = group,
+            label = list(WPV_CC ~ "Chief Complaint",
+                        WPV_ICD ~ "ICD Codes",
+                        WPV_OBHPI ~ "OBHPI",
+                        WPV_WMQ ~ "Weight management questionnaire",
+                        WPV_vtype ~ "PW Visit Type",
+                        WPV_smart ~ "PATHWEIGH Smart Set"),
+            value = list(WPV_OBHPI ~ "1",
+                         WPV_ICD ~ "1"),
+            missing = "no",
+            digits = everything() ~ c(0,1))
+```
+
+
+```{r}
+# tab 2b
+tab_data %>%
+    select(
+        Ref_BariatricSurgery:Ref_WellnessClinic,
+        BariatricSurgery,
+        N_Meds_AOM,
+        group) %>%
+    mutate(across(N_Meds_AOM, ~ifelse(. >= 1, 1, 0))) %>%
+    mutate(across(starts_with("Ref_"),  ~ factor(., levels = c("0", "1")))) %>%
+    mutate(across(starts_with("BariatricSurgery"),  ~ factor(., levels = c("0", "1")))) %>%
+    tbl_summary(
+      by = group,
+      missing = "ifany",
+      label = list(
+        Ref_BariatricSurgery ~ "Referral to bariatric surgery",
+        Ref_BehavioralHealth ~ "Referral to behavioral health",
+        Ref_Dietician ~ "Referral to dietician",
+        Ref_Endo ~ "Referral to endocrinology",
+        Ref_WellnessClinic ~ "Referral to wellness clinic",
+        BariatricSurgery ~ "Bariatric surgery",
+        N_Meds_AOM ~ "Anti-obesity medications"),
+      value = list(Ref_BariatricSurgery ~ "1",
+                   Ref_BehavioralHealth ~ "1",
+                   Ref_Dietician ~ "1",
+                   Ref_Endo ~ "1",
+                   Ref_WellnessClinic ~ "1",
+                   BariatricSurgery ~ "1",
+                   N_Meds_AOM ~ "1"),
+      digits = list(all_categorical() ~ c(0,1),
+                    all_continuous() ~ c(1,1))
+                    )
+```
+
+# Additional logistic regression models
+```{r}
+# Stratified models
+mod_data <- left_join(mod_data, (mod_data_tab %>% select(Arb_PersonId, group)), by = "Arb_PersonId")
+mod_data %<>% mutate(group = factor(group, levels = c("loss_both", "no_loss", "loss_con", "loss_int")))
+
+# both <- mod_data %>% filter(group == "loss_both")
+# no_loss <- mod_data %>% filter(group == "no_loss")
+# loss_con <- mod_data %>% filter(group == "loss_con")
+# loss_int <- mod_data %>% filter(group == "loss_int")
+```
+
+## Weight loss including "group" variable
+- groups are: loss in both, no loss, loss in control, loss in intervention
+```{r}
+#| echo: true
+model_group <- 
+  geeglm(weight_loss_12 ~
+
+  # age
+  age_45_to_60 + age_gt_60 +
+
+  # sex
+  sex_m +
+
+  # race ethnicity
+  reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+  # year at index
+  year_at_ind1 + year_at_ind2 + year_at_ind3 +
+
+  # Weight at baseline
+  Weight_bl + Intervention + group,
+
+  # Clustering
+  id = Arb_PersonId,
+
+  family = "binomial",
+
+  # Input data frame
+  data = mod_data
+  )
+```
+
+```{r}
+gt_tab(model_group)
+```
+
+## 2x2 Tables
+```{r}
+two_by_two_tables <- 
+    c("loss_both", "no_loss", "loss_con", "loss_int") %>%
+    map(
+~ mod_data %>%
+    mutate(weight_loss_12 = factor(weight_loss_12, levels = c("0", "1"))) %>%
+    filter(group == .x) %>%
+    select(weight_loss_12, Intervention) %>%
+    tbl_summary(by = Intervention)
+    )
+```
+
+### loss in both
+```{r}
+two_by_two_tables[[1]]
+```
+
+### no loss in either phase
+```{r}
+two_by_two_tables[[2]]
+```
+
+### loss in control only
+```{r}
+two_by_two_tables[[3]]
+```
+
+## loss in intervention only
+
+```{r}
+two_by_two_tables[[4]]
+```
+
+## Model with interaction with sex
+```{r}
+#| echo: true
+model_sex_int <- 
+  geeglm(weight_loss_12 ~
+
+  # age
+  age_45_to_60 + age_gt_60 +
+
+  # sex
+  Sex +
+
+  # race ethnicity
+  reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+  # year at index
+  year_at_ind1 + year_at_ind2 + year_at_ind3 +
+
+  # Weight at baseline
+  Weight_bl + Intervention + Sex:Intervention,
+
+  # Clustering
+  id = Arb_PersonId,
+
+  family = "binomial",
+
+  # Input data frame
+  data = mod_data
+  )
+```
+
+```{r}
+gt_tab(model_sex_int)
+```
+
+## Model with interaction with age
+```{r}
+#| echo: true
+model_age_int <- 
+  geeglm(weight_loss_12 ~
+
+  # age
+  # age_45_to_60 + age_gt_60 +
+  Age_cat +
+
+  # sex
+  sex_m +
+
+  # race ethnicity
+  reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+  # year at index
+  year_at_ind1 + year_at_ind2 + year_at_ind3 +
+
+  # Weight at baseline
+  Weight_bl + Intervention + Age_cat:Intervention,
+
+  # Clustering
+  id = Arb_PersonId,
+
+  family = "binomial",
+
+  # Input data frame
+  data = mod_data
+  )
+```
+
+```{r}
+gt_tab(model_age_int)
+```
+
+
+## Model with interaction with BMI
+```{r}
+#| echo: true
+
+mod_data %<>% 
+  mutate(BMI_cat = ifelse(BMI < 35, "BMI < 35", "BMI 35+"))
+
+model_bmi_int <- 
+  geeglm(weight_loss_12 ~
+
+  # age
+  age_45_to_60 + age_gt_60 +
+
+  # sex
+  sex_m +
+
+  # BMI
+  BMI_cat +
+
+  # race ethnicity
+  reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+  # year at index
+  year_at_ind1 + year_at_ind2 + year_at_ind3 +
+
+  # Weight at baseline
+  Weight_bl + Intervention + BMI_cat:Intervention,
+
+  # Clustering
+  id = Arb_PersonId,
+
+  family = "binomial",
+
+  # Input data frame
+  data = mod_data
+  )
+```
+
+```{r}
+gt_tab(model_bmi_int)
+```
+
+### BMI < 35
+```{r}
+bmi_lt35_data <- 
+  mod_data %>%
+  filter(BMI_cat == "BMI < 35")
+```
+
+```{r}
+#| echo: true
+model_bmi_lt35 <- 
+  geeglm(weight_loss_12 ~
+
+  # age
+  age_45_to_60 + age_gt_60 +
+
+  # sex
+  sex_m +
+
+  # race ethnicity
+  reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+  # year at index
+  year_at_ind1 + year_at_ind2 + year_at_ind3 +
+
+  # Weight at baseline
+  Weight_bl + Intervention,
+
+  # Clustering
+  id = Arb_PersonId,
+
+  family = "binomial",
+
+  # Input data frame
+  data = bmi_lt35_data
+  )
+```
+
+```{r}
+gt_tab(model_bmi_lt35)
+```
+
+
+### BMI 35+
+```{r}
+bmi_gt35_data <- 
+  mod_data %>%
+  filter(BMI_cat != "BMI < 35")
+```
+
+```{r}
+#| echo: true
+model_bmi_gt35 <- 
+  geeglm(weight_loss_12 ~
+
+  # age
+  age_45_to_60 + age_gt_60 +
+
+  # sex
+  sex_m +
+
+  # race ethnicity
+  reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+  # year at index
+  year_at_ind1 + year_at_ind2 + year_at_ind3 +
+
+  # Weight at baseline
+  Weight_bl + Intervention,
+
+  # Clustering
+  id = Arb_PersonId,
+
+  family = "binomial",
+
+  # Input data frame
+  data = bmi_gt35_data
+  )
+```
+
+```{r}
+gt_tab(model_bmi_gt35)
+```
+
+
+## Model with interaction with race
+```{r}
+#| echo: true
+
+model_race_int <- 
+  geeglm(weight_loss_12 ~
+
+  # age
+  age_45_to_60 + age_gt_60 +
+
+  # sex
+  sex_m +
+
+  # race ethnicity
+  Race_Ethnicity +
+
+  # year at index
+  year_at_ind1 + year_at_ind2 + year_at_ind3 +
+
+  # Weight at baseline
+  Weight_bl + Intervention + Race_Ethnicity:Intervention,
+
+  # Clustering
+  id = Arb_PersonId,
+
+  family = "binomial",
+
+  # Input data frame
+  data = mod_data
+  )
+```
+
+```{r}
+gt_tab(model_race_int)
+```
+
+# Correlations between:
+- a.) 6 to 12 month difference
+- b.) 12 to 18 month difference
+- c.) 6 to 18 month difference
+
+```{r}
+weight_loss %<>% 
+  # select(weight_6, weight_12, weight_18) %>% 
+  mutate(a = weight_12 - weight_6,
+         b = weight_18 - weight_12,
+         c = weight_18 - weight_6)
+```
+
+
+```{r}
+my_data <- weight_loss %>% select(a, b, c)
+
+res <- cor(my_data)
+# round(res, 2)
+
+data.frame(round(res, 4))%>%
+  gt::gt()
+```
