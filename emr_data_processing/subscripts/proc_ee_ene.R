@@ -46,12 +46,18 @@ if (file.exists(data_file)) {
   # If all of the encounters in ee_ene are in processed_ee_ene, then merge in
   # the labs, procedures, referrals, eoss, and comorbidities.
   if (all.equal(sort(ee_ene$Arb_EncounterId), sort(processed_ee_ene$Arb_EncounterId))) { # nolint: line_length_linter.
+    
+    # Load the column names that were added if the comorbidities were processed
+    # previously processed. This will ensure that the column names that will be
+    # merged will match with downstream steps
+    load("D:/PATHWEIGH/delivery_20240917/data/new_col_names_20240917.RData")
+    
     ee_ene <-
       left_join(ee_ene,
                 (processed_ee_ene %>%
                    select(Arb_PersonId,
                           Arb_EncounterId,
-                          EncounterDate, A1C:`Binge eating`)),
+                          EncounterDate, all_of(new_col_names))),
                 by = c("Arb_PersonId", "Arb_EncounterId", "EncounterDate"))
   } else {
     stop("Not all visits in the input data frame match data that was previously processed. Review code.") # nolint: line_length_linter.
@@ -71,27 +77,64 @@ if (file.exists(data_file)) {
   # visit are not valid, because their time window to capture these metrics is
   # from the date of the last visit to either the cross over date for control
   # phase visits, or 9-16-2024 for the intervention visits.
+
+  # Get the names before processing
+  names_1_pre <- names(ee_ene)
+
   source(str_c(emr_dir, "subscripts/proc_labs_meds.R"))
   invisible(gc())
   ee_ene <- proc_labs_meds(ee_ene)
 
+  # Get the names after processing
+  names_1_post <- names(ee_ene)
+
+  # Get the difference of the new names added
+  names_1 <- names_1_post[!names_1_post %in% names_1_pre]
+
   # PROC EOSS ------------------------------------------------------------------
+  names_2_pre <- names_1_post
   source(str_c(emr_dir, "subscripts/proc_eoss.R"))
   invisible(gc())
   ee_ene <- proc_eoss(ee_ene)
 
+  names_2_post <- names(ee_ene)
+
+  names_2 <- names_2_post[!names_2_post %in% names_2_pre]
+
   # PROC COMORBIDITIES ---------------------------------------------------------
+  names_3_pre <- names_2_post
+
   source(str_c(emr_dir, "subscripts/proc_comorbidities.R"))
   invisible(gc())
   ee_ene <- proc_comorbidities(ee_ene)
 
+  names_3_post <- names(ee_ene)
+
+  names_3 <- names_3_post[!names_3_post %in% names_3_pre]
+
   # Save processed ee_ene added columns only for future use to merge in
   # labs, meds, procedures, eoss, and comorbidities
+  # processed_ee_ene <-
+  #   ee_ene %>%
+  #   select(Arb_PersonId, Arb_EncounterId, EncounterDate,
+  #          # These are the column names in ee_ene not in visits
+  #          all_of(names(ee_ene)[!names(ee_ene) %in% names(visits)]))
+
+  # Collect all of the added column names and select them along with the
+  # Arb_PersonId, Arb_EncounterId, and EncounterDate
+
+  new_col_names <- c(names_1, names_2, names_3)
+
   processed_ee_ene <-
     ee_ene %>%
     select(Arb_PersonId, Arb_EncounterId, EncounterDate,
-           # These are the column names in ee_ene not in visits
-           all_of(names(ee_ene)[!names(ee_ene) %in% names(visits)]))
+           all_of(new_col_names))
+
+  # save new_col_names
+  save(new_col_names,
+       file = here(str_c("delivery_", data_delivery_date),
+                   "data",
+                   str_c("new_col_names_", RData)))
 
   # save processed ee_ene
   save(processed_ee_ene,

@@ -248,10 +248,6 @@ source(str_c(emr_dir, "subscripts/prep_ee_ene.R"))
 ee_ene <- prep_ee_ene(ee_ene)
 
 ## Then get the labs, procedures, and comorbidities ----
-# Both arguments should be set to TRUE. Prior functionality of setting to FALSE
-# was built in to expedite the creation of the modeling data set. However,
-# project requirement changes to include meds, labs, procedures, etc. in the
-# modeling data rendered this feature obsolete.
 source(str_c(emr_dir, "subscripts/proc_ee_ene.R"))
 invisible(gc())
 
@@ -265,27 +261,30 @@ ee_ene %<>%
 ee_ene %<>%
   mutate(EE = ifelse(Arb_PersonId %in% ee_ids, 1, 0))
 
+# Make a copy of the ee_ene before implementing the cut off date
+ee_ene_consort <- ee_ene
+
 # Cutoff index date at 03/16/2024. No one after index date 3/16/2024 should be
 # enrolled.
 if (data_delivery_date == 20240917) {
   # Only applied to those in the intervention as there are not any patients that
   # have an enrollment/index date beyond 2024-03-17 in the control phase
-  pt_ids_con <- 
+  pt_ids_con <-
     ee_ene %>%
     filter(Intervention.factor == "Control",
            IndexVisit == 1) %>%
     select(Arb_PersonId) %>%
     distinct()
-  
+
   # Get the patient ids where index visits on or after 2024-03-17.
   pt_ids_int <-
     ee_ene %>%
-    filter(Intervention.factor == "Intervention", 
+    filter(Intervention.factor == "Intervention",
            IndexVisit == 1,
            EncounterDate >= "2024-03-17") %>%
     select(Arb_PersonId) %>%
     distinct()
-  
+
   # Filter pt_ids_int
   pt_ids_int %<>%
     filter(!Arb_PersonId %in% pt_ids_con$Arb_PersonId)
@@ -293,7 +292,6 @@ if (data_delivery_date == 20240917) {
   # Remove the visits from those enrolled after the cutoff date
   ee_ene <- ee_ene %>%
     filter(!Arb_PersonId %in% pt_ids_int$Arb_PersonId)
-  
 }
 
 ## Break ee_ene data frame apart into EE (visits_post_id) and ENE ----
@@ -320,12 +318,11 @@ create_enrollment_table(visits_post_id)
 # date_2 is set to the max date available from the compass data delivery
 # date_1 will be calculated as 1 year prior to date_2 within the function.
 
-# *** requires processed labs, procedures, and comorbidities
-# *** Currently uses visits post id, but it may be worth using mod_data
-# *** Currently not working
-# if (data.frame(grep("O2CPAPBIPAP", (names(visits_post_id)))) %>% nrow() > 0) {
-#   create_safety_officer_table(visits_post_id, date_2 = date_max)
-# }
+# If statement placed here as a crude way to run only if comorbidities are
+# present
+if (data.frame(grep("O2CPAPBIPAP", (names(visits_post_id)))) %>% nrow() > 0) {
+  create_safety_officer_table(visits_post_id, date_2 = date_max)
+}
 
 # Make mod_data ----------------------------------------------------------------
 # Create a data frame for the primary aim statistical models. Automatically
@@ -342,12 +339,8 @@ source(str_c(emr_dir, "subscripts/make_pp_data.R"))
 invisible(gc())
 
 # Run the participant flow diagram script --------------------------------------
-pp_mod_data %>% 
-  group_by(Arb_PersonId) %>% 
-  slice_head() %>% 
-  ungroup() %>% 
-  select(Cohort) %>% 
-  tbl_summary()
+source(str_c(emr_dir, "subscripts/participant_flow_diagram_values_aim1a.R"))
+
 
 # Save datasets ----------------------------------------------------------------
 # can also use a substring on RData to just get the date.

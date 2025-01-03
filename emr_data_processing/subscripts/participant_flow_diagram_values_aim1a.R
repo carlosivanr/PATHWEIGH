@@ -1,4 +1,4 @@
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # Carlos Rodriguez, PhD. CU Anschutz Dept. of Family Medicine 
 
 # Participant Flow Diagram Table
@@ -11,11 +11,15 @@
 # ** Could try swapping out ee for visits_post_id, since sometimes ee can get
 # modified in the workspace by other subscripts.
 
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # Participant Flow Diagram Values for Aim 1A
+# n.b. cutoff date is 03/16/2024. No one after index date 3/16/2024 was
+# placed in the enrolled group. ee_ene_consort data frame contains these
+# individuals, but they are excluded by the time the pp_mod_data analysis data
+# set is created.
 
-# Initialize an empty data frame -----------------------------------------------
+# Initialize an empty data frame ----------------------------------------------
 pt_flow <- NULL
 
 pt_flow <- data.frame(pt_flow) %>%
@@ -26,8 +30,7 @@ pt_flow <- data.frame(pt_flow) %>%
          value = as.numeric(value),
          source = as.character(source))
 
-# 1. Total number of encounters
-# 1. Unique number of encounters ---------------------------------------------------
+# 1. Unique number of encounters ----------------------------------------------
 # Use the visits data frame bc it has been filtered for duplicates
 pt_flow <- 
   bind_rows(pt_flow,
@@ -38,8 +41,7 @@ pt_flow <-
               source = "visits") %>%
        select(type, everything())))
 
-# 2. Total number of unique patients
-# 2. Unique number of patients ----------------------------------------------------
+# 2. Unique number of patients ------------------------------------------------
 # Use the visits data frame, bc it will give unique # of patients in the data
 # set that has been filtered
 pt_flow <- 
@@ -51,8 +53,7 @@ pt_flow <-
                       source = "visits") %>%
                select(type, everything())))
 
-# 3. Total number of eligible patients
-# 3. Unique number of eligible patients -------------------------------------------
+# 3. Unique number of eligible patients ---------------------------------------
 # Use ee_ene_consort, since these records represent those that met eligibility
 # criteria of having age >= 18, BMI >= 25, and in the case of EE had a weight
 # prioritized visit
@@ -66,8 +67,7 @@ pt_flow <-
                       source = "ee_ene_consort") %>%
                select(type, everything())))
 
-# 2.1 Difference between #2 and #3
-# 4. Unique number of exclusions ---------------------------------------------------------
+# 4. Unique number of exclusions ----------------------------------------------
 # The unique number of patients excluded is given by the number of unique patient
 # ids in visits that are not in ee_ene.
 # Capture the Arb_PersonIds of those that have an eligible visit
@@ -87,7 +87,7 @@ pt_flow <-
             )
 
 
-# 4. Total number of analyzed patients
+# 5. Total number of analyzed patients ----------------------------------------
 pt_flow <-
   bind_rows(pt_flow,
             (pp_mod_data %>%
@@ -99,7 +99,7 @@ pt_flow <-
               select(type, everything()))
             )
 
-# 3.1 difference between #3 and #4
+# 6. Excluded for not receiving any discernible care for weight ever ----------
 pt_flow <-
   bind_rows(pt_flow,
             (ee_ene_consort %>% 
@@ -108,12 +108,12 @@ pt_flow <-
               distinct() %>%
               summarise(value = n()) %>%
               mutate(type = "Excluded for not receiving any discernible care for weight ever",
-                      source = "ee_ene_consort") %>%
+                     source = "ee_ene_consort") %>%
               select(type, everything()))
   )
 
 
-# 3.2 exlucded for not having 2 or more weights in each phase
+# 7. Exlucded for not having 2 or more weights in each phase ------------------
 pt_flow <-
   bind_rows(pt_flow,
             (ee_ene_consort %>%
@@ -123,14 +123,12 @@ pt_flow <-
               distinct() %>%
               summarise(value = n()) %>%
               mutate(type = "Excluded for not having index + follow up with weight in both phases",
-                    source = "ee_ene_consort") %>%
+                     source = "ee_ene_consort") %>%
               select(type, everything()))
               )
 
 
-
-# 5. Subset the analyzed patients in control
-# and then determine the number of patients in each cohort
+# 8. Unique patients enrolled in each cohort during control phase -------------
 pt_flow <-
   bind_rows(pt_flow,
             (pp_mod_data %>%
@@ -147,14 +145,11 @@ pt_flow <-
               select(type, everything(), -Cohort))
   )
 
-# Output table to .csv file ----------------------------------------------------
-write_csv(pt_flow,here(proj_root_dir, "tables", str_c("pt_flow_aim1a_", date_max, "_", Sys.Date(), ".csv")))
-# *****************************************************************************
 
-
-
-
-
-
-
-  
+# Output table to .csv file ---------------------------------------------------
+write_csv(pt_flow, 
+          here(proj_root_dir, 
+               "tables", 
+               str_c("pt_flow_aim1a_", date_max, "_", Sys.Date(), ".csv")
+              )
+          )

@@ -5,7 +5,7 @@ format:
   html:
     embed-resources: true
 params:
-  data: "20240326.RData"
+  data: "20240917.RData"
 ---
 
 ```{r, echo = FALSE}
@@ -25,7 +25,7 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.width 
 #Set Start and End dates
 end_date <- as.Date(lubridate::ymd(substr(params$data, 1, 8)))
 # start_date <- end_date-365
-start_date <- "2023-03-17"
+start_date <- "2023-03-17" # This represents the last year for the control phase visits
 ```
 
 
@@ -91,7 +91,7 @@ use_df_printer()
 ```{r, echo=FALSE}
 # Set the path to the emr_data_processing directory to load scripts/functions
 data_delivery_date <- str_remove(params$data, ".RData")
-proj_root_dir <- str_c("dataset_", data_delivery_date)
+proj_root_dir <- str_c("delivery_", data_delivery_date)
 proj_parent_dir <- str_remove(here(), "emr_data_processing")
 ```
 
@@ -105,7 +105,7 @@ proj_parent_dir <- str_remove(here(), "emr_data_processing")
 
 ```{r, echo = FALSE}
 # The path will be relative to emr_data_processing with here()
-file_path <- str_c(proj_parent_dir, proj_root_dir, "/data/", "sot_", params$data)
+file_path <- str_c(proj_parent_dir, "/", proj_root_dir, "/data/", "sot_", params$data)
 
 # print(file_path)
 ```
@@ -127,8 +127,8 @@ load(file_path)
            death,
            any_hosp) %>%
     mutate(Intervention = recode(Intervention,
-                                 `0` = "Control (2022-03-17 to 2023-03-16)",
-                                 `1` = str_c("Intervention (2023-03-17 to ", end_date, ")"))) %>%
+                                 `0` = "Control",
+                                 `1` = "Intervention")) %>%
     tbl_summary(by = Intervention,
                 digits = everything() ~ 2,
                 missing = "no",
@@ -196,8 +196,8 @@ t2 <-
     select(Intervention,
            n_hospitalizations) %>%
     mutate(Intervention = recode(Intervention,
-                                 `0` = "Control (2022-03-17 to 2023-03-16)",
-                                 `1` = str_c("Intervention (2023-03-17 to ", end_date, ")"))) %>%
+                                 `0` = "Control",
+                                 `1` = "Intervention")) %>%
     tbl_custom_summary(by = Intervention,
                        stat_fns = list(c(n_hospitalizations) ~ my_stats),
                        statistic = list(c(n_hospitalizations) ~ "{marker_sum}"),
