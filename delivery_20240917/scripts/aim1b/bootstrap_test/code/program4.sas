@@ -1,27 +1,36 @@
-options nofmterr nonotes;
+options nonotes nofmterr;
+ods select none;
 
 /* libname PW "C:\Users\bsc-default\Documents\bcs\PathWeigh"; */
-libname PW "D:\PATHWEIGH\delivery_20240917\scripts\aim1b\bootstrap";
+libname PW "D:\PATHWEIGH\delivery_20240917\scripts\aim1b\bootstrap_test";
 
 *read in the CSV data with n=9358*2;
 
+/*Set the program number for looping */
+%let prog_num = 4;
+
 /* Set the start of the bootstrap iteration to break up the processing */
-%let start = 401;
+%let start = 501;
 
 /* Set the number of bootstrap samples, or the stop */
-%let num_bootstrap = 500;
+%let num_bootstrap = 600;
 
 
 /* Set the output templog */
-proc printto log="templog_&start-&num_bootstrap..log" new;
-run;
+/* proc printto log="templog_&start-&num_bootstrap..log" new;
+run; */
 
 
-/* Input dataset name */
+/* Input dataset name: represents al of the oberved weight values */
 %let input_dataset = pw.analysis;
 
+/* Create a copy of the bootstrap samples data set */
+data bootstrap_samples&prog_num.;
+	set pw.bootstrap_samples;
+run;
+
 /* Output dataset for bootstrap samples */
-%let output_dataset = bootstrap_samples;
+%let output_dataset = bootstrap_samples&prog_num;
 
 /* Unique subject identifier variable */
 %let id_var = id;
@@ -40,6 +49,7 @@ proc sql;
     from &input_dataset.;
 quit;
 
+
 %macro bootstrap;
     %do i = &start %to &num_bootstrap;
         /* Resample unique subjects with replacement */
@@ -49,10 +59,12 @@ quit;
                           samprate=1 
                           outhits; /* Allows duplicate rows for bootstrapping */
         run;
+
 		data resampled_ids&i;
             set resampled_ids&i;
 			newid=_n_; drop numberhits;
         run;        /* Merge resampled subject IDs back with the original data */
+
         proc sql;
             create table sample&i as
             select a.*, b.*
@@ -83,7 +95,13 @@ quit;
 /* Execute the macro */
 %bootstrap;
 
-data pw.bootstrap_samples; set bootstrap_samples; run;
+
+data pw.bootstrap_samples&prog_num.; 
+	set bootstrap_samples&prog_num.;
+run;
+
+
+
 
 /* Tabulations of GBD regions and 10-year calendar year periods 
 proc freq data = pw.analysis;
@@ -95,12 +113,12 @@ proc sort data=pw.analysis; by intervention id month; run;
 %macro imputation;
    %do i = &start %to &num_bootstrap;
 data intervention;
-set pw.bootstrap_samples;
+set pw.bootstrap_samples&prog_num.;
 where intervention eq "Interve" & bootstrap_iter = &i;
 run;
 
 data control;
-set pw.bootstrap_samples;
+set pw.bootstrap_samples&prog_num.;
 where intervention eq "Control" & bootstrap_iter = &i;
 run;
 

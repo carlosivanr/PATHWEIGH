@@ -5,12 +5,13 @@ pacman::p_load(tidyverse,
   gtsummary)
 library(magrittr, include = "%<>%")
 
+tictoc::tic()
 # Set the data directory where all of the bootstrap output is stored.
 data_dir <- "D:/PATHWEIGH/delivery_20240917/scripts/aim1b/bootstrap/"
 
 
 # Set the number of bootstraps to read ----------------------------------------
-n_bootstraps <- 6
+n_bootstraps <- 1000
 
 # Load and prep the pp_data set -----------------------------------------------
 load("D:/PATHWEIGH/delivery_20240917/data/pp_data_20240917.RData")
@@ -19,6 +20,8 @@ load("D:/PATHWEIGH/delivery_20240917/data/pp_data_20240917.RData")
 # available. These will be used in a series of coalescing function calls
 # to retain the observed weight in cases where it is available instead
 # of the imputed weight.
+# Produces a data frame for individuals who have one of the 6, 12, or 18 month
+# weight values.
 observed_weights <- pp_data %>%
   filter(N_months_post_id == 6 |
         N_months_post_id == 12 |
@@ -33,7 +36,7 @@ observed_weights <- pp_data %>%
 
 
 # Create binary indicator variables for the age, sex, race, and year at index
-# categorical variables to be used in modeling.
+# categorical variables to be used in modeling in the pp_data frame
 pp_data %<>%
   mutate(age_lt_45 = ifelse(Age_cat == "<=45", 1, 0),
          age_45_to_60 = ifelse(Age_cat == "45-60", 1, 0),
@@ -78,13 +81,13 @@ for (i in 1:n_bootstraps) {
   # Stack the two data sets together
   imputed_weights <- bind_rows(con, int)
 
-  # Remove the first 3 characters from id column, rename as Arb_PersonId and then
-  # convert to factor to be able to merge data. Remove the id column since it
-  # will no longer be used
+  # Factor newid since it will be the new identifier to use as the grouping 
+  # variable in the boot strap models. Then create Arb_PersonId from ID and
+  # factor it so that it can be used to join in a subsequent step.
   imputed_weights %<>%
     mutate(Arb_PersonId = ID) %>%
-    mutate(Arb_PersonId = factor(Arb_PersonId)) %>%
-    select(-ID)
+    mutate(newid = factor(newid)) %>%
+    mutate(Arb_PersonId = factor(Arb_PersonId))
   
   # Create a data frame of the imputed weights and the observed weights
   weight_loss <- 
@@ -102,15 +105,14 @@ for (i in 1:n_bootstraps) {
     mutate(weight_loss_12 = ifelse(weight_12 < weight_6, 1, 0),
            weight_loss_18 = ifelse(weight_18 < weight_12, 1, 0))
   
-  # Should join each of the new variables to all rows within each phase for each patient
+  # Join each of the new variables to all rows within each phase for each patient
   mod_data <-
     left_join(pp_data %>% filter(IndexVisit == 1, Arb_PersonId %in% weight_loss$Arb_PersonId), 
               weight_loss %>% select(Arb_PersonId, Intervention, weight_loss_12, newid),
-              by = c("Arb_PersonId", "Intervention")) %>%
-    mutate(newid = factor(newid))
-  
+              by = c("Arb_PersonId", "Intervention"))
+
   # Logistic Regression Model  
-  # specify the 12m weight loss model
+  # specify the 12m weight loss model independent variables
   ivs <- " ~ age_45_to_60 + age_gt_60 +  
           sex_m +
           reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
@@ -136,11 +138,48 @@ for (i in 1:n_bootstraps) {
 
   # Append the result of the current iteration into the pre defined list.
   all_results[[i]] <- result
+  
+  # Are there any objects that need to be removed from the workspace? If so,
+  # they can be placed here.
+  
   }
 
 # Flattend all_results list
 output <- list_rbind(all_results)
 
-# Calculate the SE for each estimate
 
 # Then output to a .csv or .Rdata
+write_csv(output,  "D:/PATHWEIGH/delivery_20240917/scripts/aim1b/bootstrap/code/bootstrap_results.csv")
+
+
+tictoc::toc()
+beepr::beep(sound = 8)
+
+# Function to calculate 2.5th and 97.5th percentiles for a single column
+calculate_percentiles <- function(column) {
+  quantile(column, probs = c(0.025, 0.975))
+}
+
+# Apply the function to each column of the dataset
+percentiles <- apply(output %>% select(-boot_iter), 2, calculate_percentiles)
+
+percentiles_df <- as.data.frame(t(percentiles))
+
+percentiles_df <- cbind(estimate = rownames(percentiles_df), percentiles_df)
+
+rownames(percentiles_df) <- 1:nrow(percentiles_df)
+
+# Save output
+write_csv(percentiles_df,  "D:/PATHWEIGH/delivery_20240917/scripts/aim1b/bootstrap/code/bootstrap_percentiles.csv")
+
+# Get the means
+unexp_means <- output %>%
+  select(-boot_iter) %>%
+  summarise_all(mean)
+
+write_csv(unexp_means,  "D:/PATHWEIGH/delivery_20240917/scripts/aim1b/bootstrap/code/unexponentiated_parm_means.csv")
+
+# LEFT OFF HERE
+# Per Q.Pan 01/09/2025, halt any efforts on Aim  1B, due to boot strap results
+# not confirming the logistic regression model results
+

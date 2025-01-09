@@ -248,9 +248,10 @@ model.12 <-
 
 <!-- ## Logistic regression parameter estimates (unexponentiated) -->
 ```{r}
-#| eval: false
-broom::tidy(model.12) %>%
-    gt::gt()
+unexp_parms <- broom::tidy(model.12) %>%
+    select(term, estimate) %>%
+    pivot_wider(names_from = term, values_from = estimate) %>%
+    write_csv(., "D:/PATHWEIGH/delivery_20240917/scripts/aim1b/unexponentiated_parms.csv")
 ```
 
 ## Logistic regression parameter estimates (exponentiated)
