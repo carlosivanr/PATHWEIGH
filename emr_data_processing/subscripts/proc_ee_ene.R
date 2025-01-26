@@ -13,6 +13,8 @@
 #             comorbidities processing into separate steps for better trouble
 #             shooting and for parallel processing. Modified the comorbidities
 #             step to resemble labs/procedures and eoss.
+# 01/24/2025: Updated Meds_weight_gain and Meds_weight_loss, since they were
+#             placed on the back burner to prioritize N_meds_aom
 
 # Capturing, labs/procedures, referrals, meds, eoss, and comorbidities is one of
 # the most time consuming sections of the pathweigh data processing pipeline. In
@@ -78,17 +80,18 @@ if (file.exists(data_file)) {
   # from the date of the last visit to either the cross over date for control
   # phase visits, or 9-16-2024 for the intervention visits.
 
-  # Get the names before processing
+  # Get the names before processing to be able to capture which columns were
+  # added
   names_1_pre <- names(ee_ene)
 
   source(str_c(emr_dir, "subscripts/proc_labs_meds.R"))
   invisible(gc())
   ee_ene <- proc_labs_meds(ee_ene)
 
-  # Get the names after processing
+  # Get the names after processing to get the new columns
   names_1_post <- names(ee_ene)
 
-  # Get the difference of the new names added
+  # Get the difference of the new names added to get the added columns
   names_1 <- names_1_post[!names_1_post %in% names_1_pre]
 
   # PROC EOSS ------------------------------------------------------------------
