@@ -100,7 +100,10 @@ proc_labs_meds <- function(data) {
 
   # Define a function to process the data
   proc_data <- function(temp) {
-    purrr::walk(.x  = c("procedure", "labs", "flowsheets", "referrals", "meds"),
+    # Load the compass tables required to perform the following processing
+    # steps. Read_pw_csv is a custom function that loads the raw compass table
+    # based on the file names
+    purrr::walk(.x = c("procedure", "labs", "flowsheets", "referrals", "meds"),
                 .f = read_pw_csv)
 
     temp <- labs_procedures(temp)
