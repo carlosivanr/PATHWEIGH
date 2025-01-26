@@ -1,0 +1,196 @@
+---
+title: "AOMs & Procedures by Year"
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+
+execute: 
+  echo: false
+---
+
+```{r}
+ # Load pp_data to get the patients in Aim1A
+
+# load the visits post_id data to get the index visit rows that contain procedures and AOMs
+
+# Review how AOMs and Procedures are captured
+# Bariatric Surgery - At any time during the phase
+# - 10/24/2024 Stats group, capture the medications that were started in agiven phase even if they 
+# were carried over from control to intervention
+# If the reference visits are from the Control phase, then keep records
+# where the OrderedDate is before the cross over date. This will capture
+# records of AOMs that were ordered. n.b. OrderDate doesn't always equal
+# the start date
+
+# If the reference visits are from the Intervention phase, then keep the
+# records where 1) the OrderedDate is on or after the cross over date to
+# get records for those that were ordered an AOM in intervention; 2) the
+# EndDate is on or after the cross over date to get records for those that
+# had an Ordered date before the cross over, but continued medication into
+# the intervention; and 3) the EndDate is missing, to get records for those
+# that are continuing AOM medication
+# This will count those that had an order in intervention and/or had
+# continued use from the control
+```
+
+```{r}
+pacman::p_load(tidyverse, 
+               gtable,
+               install = FALSE)
+
+library(magrittr, include = "%<>%")
+```
+
+```{r}
+# Load the pp_data - Contains all visits after the index date from patients
+# with 2 or more visits in both control and intervention phase
+load("D:/PATHWEIGH/delivery_20240917/data/pp_data_20240917.RData")
+```
+
+```{r}
+# Load visits_post_id, all visits on or after the index date for EE patients
+load("D:/PATHWEIGH/delivery_20240917/data/visits_post_id_20240917.RData")
+```
+
+```{r}
+# Get the encounter ids for all of the index visits in pp_data
+index_ids <-
+    pp_data %>%
+    filter(IndexVisit == 1) %>%
+    select(Arb_EncounterId)
+```
+
+```{r}
+# Filter the index_ids from visits_post_id
+visits_post_id %<>%
+  filter(Arb_EncounterId %in% index_ids$Arb_EncounterId)
+```
+
+# Overall total number of ordered AOMs in each phase
+```{r}
+visits_post_id %>%
+  group_by(Intervention.factor) %>%
+  summarise(total_n_aom = sum(N_Meds_AOM)) %>%
+  knitr::kable()
+```
+
+# Overall total number of ordered AOMs in each year
+```{r}
+visits_post_id %>%
+  group_by(Year) %>%
+  summarise(total_n_aom = sum(N_Meds_AOM)) %>%
+  knitr::kable()
+```
+
+# Number of ordered AOMs in each year by intervention
+```{r}
+visits_post_id %>%
+  group_by(Year, Intervention.factor) %>%
+  summarise(total_n_aom = sum(N_Meds_AOM)) %>%
+  knitr::kable()
+```
+
+# Number of patients with at least one ordered AOM by phase
+```{r}
+visits_post_id %>%
+  mutate(aom = ifelse(N_Meds_AOM > 0, 1, 0)) %>%
+  group_by(Intervention.factor) %>%
+  summarise(total_n_pts_w_aom = sum(aom)) %>%
+  ungroup() %>%
+  mutate(percent_N = round(total_n_pts_w_aom / 9358 * 100, 2)) %>%
+  knitr::kable()
+```
+
+# Overall total number of patients with at least one ordered AOM in each year
+```{r}
+left_join(
+  (visits_post_id %>%
+  mutate(aom = ifelse(N_Meds_AOM > 0, 1, 0)) %>%
+  group_by(Year) %>%
+  summarise(total_n_pts_w_aom = sum(aom)) %>%
+  ungroup()),
+
+  (visits_post_id %>%
+  filter(IndexVisit == 1) %>%
+  group_by(Year) %>%
+  count() %>%
+  ungroup()),
+  
+  by = "Year"
+) %>%
+mutate(percent_n =  round(total_n_pts_w_aom / n * 100, 2)) %>%
+knitr::kable()
+```
+
+# Number of patients with at least one ordered AOM in each year by intervention
+```{r}
+left_join(
+  (visits_post_id %>%
+  mutate(aom = ifelse(N_Meds_AOM > 0, 1, 0)) %>%
+  group_by(Year, Intervention.factor) %>%
+  summarise(total_n_pts_w_aom = sum(N_Meds_AOM)) %>%
+  ungroup()),
+
+  (visits_post_id %>%
+  filter(IndexVisit == 1) %>%
+  group_by(Year, Intervention.factor) %>%
+  count() %>%
+  ungroup()),
+
+  by = c("Year", "Intervention.factor")
+) %>%
+mutate(percent_n =  round(total_n_pts_w_aom / n * 100, 2)) %>%
+knitr::kable()
+
+```
+
+
+# Overall total number of bariatric procedures in each phase
+```{r}
+visits_post_id %>%
+  group_by(Intervention.factor) %>%
+  summarise(total_n_procs = sum(BariatricSurgery)) %>%
+  ungroup() %>%
+  mutate(percent_N = round(total_n_procs / 9358 * 100, 2)) %>%
+  knitr::kable()
+```
+
+# Overall total number of bariatric procedures in each year
+```{r}
+left_join(
+  (visits_post_id %>%
+  group_by(Year) %>%
+  summarise(total_n_procs = sum(BariatricSurgery)) %>%
+  ungroup()),
+
+  (visits_post_id %>%
+  filter(IndexVisit == 1) %>%
+  group_by(Year) %>%
+  count() %>%
+  ungroup()),
+
+  by = "Year"
+) %>%
+mutate(percent_n = round(total_n_procs / n * 100, 2)) %>%
+knitr::kable()
+```
+
+# Number of bariatric procedures in each year by intervention
+```{r}
+left_join(
+  (visits_post_id %>%
+  group_by(Year, Intervention.factor) %>%
+  summarise(total_n_procs = sum(BariatricSurgery)) %>%
+  ungroup()),
+
+  (visits_post_id %>%
+  filter(IndexVisit == 1) %>%
+  group_by(Year, Intervention.factor) %>%
+  count() %>%
+  ungroup()),
+
+  by = c("Year", "Intervention.factor")
+) %>%
+mutate(percent_n = round(total_n_procs / n * 100, 2)) %>%
+knitr::kable()
+```
