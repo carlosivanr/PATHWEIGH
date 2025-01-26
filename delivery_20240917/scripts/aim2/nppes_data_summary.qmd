@@ -1,0 +1,35 @@
+---
+title: "NPPES data summary "
+
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+
+echo: false
+---
+
+```{r}
+library(magrittr, include = "%<>%")
+pacman::p_load(tidyverse, 
+               gtsummary,
+               gt)
+```
+
+```{r}
+# Load SAS data from Jake
+data <- haven::read_sas("D:\\PATHWEIGH\\delivery_20240917\\scripts\\aim2\\nppes_data.sas7bdat")
+```
+
+# Column names and data types
+```{r}
+str(data)
+```
+
+# Data summary
+```{r}
+data %>%
+  select(-NPI) %>%
+  # mutate(YearReg = factor(YearReg),
+  #        YearUpdate = factor(YearUpdate)) %>%
+  tbl_summary()
+```
