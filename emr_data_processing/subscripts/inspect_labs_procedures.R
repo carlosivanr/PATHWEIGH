@@ -29,5 +29,5 @@ visits_post_id %>%
   modify_caption("**Number of missing values by intervention index visit**") %>%
   as_gt() %>%
   gt::gtsave( # save table as image
-    filename = here("tables", str_c("missing_labs_n_procedures_table_", date_max, "_", Sys.Date(), ".pdf"))
+    filename = here("tables", str_c("missing_labs_n_procedures_table_", date_max, "_", Sys.Date(), ".html"))
   )
