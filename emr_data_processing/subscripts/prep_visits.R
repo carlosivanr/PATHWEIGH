@@ -61,6 +61,10 @@ visits %<>%
   mutate(Age = as.numeric((EncounterDate - BirthDate) / 365),
          Age = ifelse(Age > 90, 90, Age))
 
+# Filter out visits where age is less than 18
+visits %<>% 
+  filter(Age >= 18)
+
 # Adults (age >=18) with BMI>=25 at index visit
 # Some visits will not have Age or BMI and will result in an NA value, so those
 # must be turned to 0 in the 2nd mutate statement
