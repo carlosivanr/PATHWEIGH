@@ -262,6 +262,6 @@ create_enrollment_table <- function(data){
     gtsummary::modify_caption(cap) %>%
     gtsummary::as_gt() %>%
     gt::gtsave( # save table as image
-      filename = here(proj_root_dir, "tables", str_c("enrollment_table_", date_max, "_", Sys.Date(), ".pdf")))
+      filename = here(proj_root_dir, "tables", str_c("enrollment_table_", date_max, "_", Sys.Date(), ".html")))
   
 }
