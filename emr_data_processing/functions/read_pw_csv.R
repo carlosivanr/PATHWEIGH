@@ -16,6 +16,12 @@ file_map <-
          df_name = if_else(df_name == "dxcomo", "dxco", df_name))
 
 read_pw_csv <- function(x) {
+  #' Read a pathweigh compass .csv file
+  #'
+  #' @param x a compass .csv file one of the following "labs", "meds",
+  #' "referrals", "flowsheets", "smart", "dxco"
+  #' read_pw_csv("labs")
+
   csv_file <-
     file_map %>%
     filter(df_name == x) %>%
