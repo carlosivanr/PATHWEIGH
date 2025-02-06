@@ -9,6 +9,22 @@ echo: false
 ---
 
 ```{r}
+# *****************************************************************************
+# Carlos Rodriguez, PhD. CU Anschutz Dept. of Family Medicine.
+# nppess_data_summary
+
+# The purpose of this script is to display the columns from the SAS nppes_data 
+# file. This file was create by Jake ??? at ACCORDS under the supervision of
+# Mark Gritz. The Nppes data contains the designation of FM, IM, or OTHER 
+# physician or APP, Gender, and Years since registering an NPI for the
+# providers linked to the encounters in the Aim 1 data
+
+# After reviewing data, the goal is to use the provider characteristics in the
+# mediation/moderation models of Aim 2. 
+# *****************************************************************************
+```
+
+```{r}
 library(magrittr, include = "%<>%")
 pacman::p_load(tidyverse, 
                gtsummary,
