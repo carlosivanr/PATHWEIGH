@@ -1,0 +1,329 @@
+---
+title: "Aim2: Mediators"
+# format: html
+format:
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+
+execute: 
+  echo: false
+---
+
+```{r}
+# *****************************************************************************
+# Carlos Rodriguez, PhD. CU Anschutz Dept. of Family Medicine.
+# aim2_results_mediators
+
+# The purpose of this script is to display the output from a series of
+# mediation models for PATHWEIGH AIM 2.
+# *****************************************************************************
+```
+
+```{r}
+# Load data
+library(magrittr, include.only = "%<>%")
+pacman::p_load(tidyverse,
+               gtsummary)
+
+data <- read_csv( 
+          file = "D:/PATHWEIGH/delivery_20240917/data/aim2_data_20240917.csv",
+          show_col_types = FALSE
+          )
+```
+
+
+```{r}
+# Create the modeling data frame %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+mod_data <- data %>% filter(IndexVisit != 1)
+
+mod_data %<>%
+  mutate(Arb_PersonId = factor(Arb_PersonId))
+
+mod_data %<>%
+  mutate(Race_Ethnicity = relevel(factor(Race_Ethnicity), ref = "Non-Hispanic White")) %>%
+  mutate(Age_cat = relevel(factor(Age_cat), ref = "45-60"))
+
+# Convert the N_days_post_* variables to N_months_post_* by dividing days by 30
+# should be equivalent to multiplying the parameter estimates of N_days_post_*
+# by 30 in the output table, but much easier to work with. Otherwise it is a 
+# challenge to modify tidy() or tbl_regression() output for display in a word
+# or .html document.
+mod_data %<>%
+  mutate(N_months_post_id = N_days_post_id / 30,
+         N_months_post_180 = N_days_post_180 / 30)
+
+# create 4 new variables for mediation models
+mod_data %<>%
+  mutate(N_months_post_id1 = slope1 * N_months_post_id,
+         N_months_post_id2 = slope2 * N_months_post_id,
+         N_months_post_180_1 = slope1 * N_months_post_180,
+         N_months_post_180_2 = slope2 * N_months_post_180)
+
+mod_data %<>%
+  mutate(Cohort3 = ifelse(Cohort == "Cohort3", 1, 0))
+```
+
+```{r}
+mediators <- 
+  c(
+    "Any_ref",
+    # "BariatricSurgery", # resulted in glm.fit: fitted probabilities numerically 0 or 1 occurred only 645 with surgery
+    "Meds_AOM",
+    "Meds_Gain",
+    "Meds_Loss",
+    "Engagement",
+    "Cohort3"
+    )
+```
+
+# Model Frame Work
+slope1 - Binary indicator where 1 == Intervention
+slope2 - Binary indicator where 1 == Control
+N_months_postid1 - slope1 * N_months_postid. First six months in the intervention phase.
+N_months_post180_1 - slope1 * N_months_post180. Second six months in the intervention phase.
+N_months_postid2 - slope2 * N_months_postid. First six months in the control phase.
+N_months_post180_2 - slope2 * N_months_post180. Second six months in the control phase
+
+## PART1: Mediator model
+```{r, eval = FALSE, echo = TRUE}
+# PART 1: Do the IVs predict the mediator
+med_mod <- glm(
+
+  [MEDIATOR] ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + treat +
+
+  N_months_post_id1 + N_months_post_180_1 + 
+    
+  N_months_post_id2 + N_months_post_180_2,
+  
+  data = mod_data,
+
+  family = "binomial"/"poisson"
+)
+```
+
+## PART2: Outcome model
+```{r, eval = FALSE, echo = TRUE}
+# PART 2: Model the outcome adjusting for the mediator
+out_mod <-  lm(
+
+  Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + treat +
+
+  [MEDIATOR] + 
+
+  N_months_post_id1 + N_months_post_180_1 + 
+    
+  N_months_post_id2 + N_months_post_180_2,
+  
+  data = mod_data
+)
+```
+
+## PART3: Mediate function to estimate the ACME and ADE
+```{r, eval = FALSE, echo = TRUE}
+med_fit <- mediation::mediate(med_mod, out_mod, 
+  treat = "slope1", 
+  mediator = [MEDIATOR],
+  robustSE = TRUE,
+  sims = 100)
+
+summary(med_fit)
+```
+
+```{r, eval = FALSE, echo = TRUE}
+# OTHER TERMS TO TEST
+med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_id1", mediator = [MEDIATOR])
+med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_180_1", mediator = [MEDIATOR])
+med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_id2", mediator = [MEDIATOR])
+med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_180_2", mediator = [MEDIATOR])
+```
+
+```{r}
+extract_mediation_summary <- function (x) { 
+
+  clp <- 100 * x$conf.level
+  isLinear.y <- ((class(x$model.y)[1] %in% c("lm", "rq")) || 
+                   (inherits(x$model.y, "glm") && x$model.y$family$family == 
+                      "gaussian" && x$model.y$family$link == "identity") || 
+                   (inherits(x$model.y, "survreg") && x$model.y$dist == 
+                      "gaussian"))
+
+  printone <- !x$INT && isLinear.y
+
+  if (printone) {
+
+    smat <- c(x$d1, x$d1.ci, sprintf("%.4f", x$d1.p))
+    smat <- rbind(smat, c(x$z0, x$z0.ci, sprintf("%.4f", x$z0.p)))
+    smat <- rbind(smat, c(x$tau.coef, x$tau.ci, sprintf("%.4f", x$tau.p)))
+    smat <- rbind(smat, c(x$n0, x$n0.ci, sprintf("%.4f", x$n0.p)))
+
+    # Rename columns
+    rownames(smat) <- c("ACME", "ADE", "Total Effect", "Prop. Mediated")
+
+  } else {
+    smat <- c(x$d0, x$d0.ci, x$d0.p)
+    smat <- rbind(smat, c(x$d1, x$d1.ci, x$d1.p))
+    smat <- rbind(smat, c(x$z0, x$z0.ci, x$z0.p))
+    smat <- rbind(smat, c(x$z1, x$z1.ci, x$z1.p))
+    smat <- rbind(smat, c(x$tau.coef, x$tau.ci, x$tau.p))
+    smat <- rbind(smat, c(x$n0, x$n0.ci, x$n0.p))
+    smat <- rbind(smat, c(x$n1, x$n1.ci, x$n1.p))
+    smat <- rbind(smat, c(x$d.avg, x$d.avg.ci, x$d.avg.p))
+    smat <- rbind(smat, c(x$z.avg, x$z.avg.ci, x$z.avg.p))
+    smat <- rbind(smat, c(x$n.avg, x$n.avg.ci, x$n.avg.p))
+
+    rownames(smat) <- c("ACME (control)", "ACME (treated)", 
+                        "ADE (control)", "ADE (treated)", "Total Effect", 
+                        "Prop. Mediated (control)", "Prop. Mediated (treated)", 
+                        "ACME (average)", "ADE (average)", "Prop. Mediated (average)")
+
+  }
+
+  colnames(smat) <- c("Estimate", paste(clp, "% CI Lower", sep = ""), 
+                      paste(clp, "% CI Upper", sep = ""), "p-value")
+  smat
+
+}
+
+# extract_mediation_summary(summary(med_fit))
+```
+
+```{r}
+format_mediation <- function(output) {
+
+  mediation_tab <- output %>% 
+  as.data.frame() %>% 
+  rownames_to_column(., "Characteristic") %>%
+  as_tibble() %>%
+  mutate(across(Estimate:`95% CI Upper`, ~ as.numeric(.))) %>%
+  mutate(across(where(is.numeric), ~ round(., 4))) 
+  
+  return(mediation_tab)
+}  
+```
+
+```{r, warnings = FALSE}
+#| echo: false
+#| results: 'asis'
+
+for (i in 1:length(mediators)) {
+  # Set the mediator variable for the model
+  mediator <- mediators[i]
+
+  # Set the number of sims
+  n_sims <- 100
+
+  cat("## ", mediator, "\n\n")
+
+  cat("### ", mediator, "Part1: Mediator Model", "\n\n")
+  
+  # PART 1: Do the IVs predict the mediator
+  part1_formula <- as.formula(str_c(mediator, 
+  " ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + slope1 + N_months_post_id1 + N_months_post_180_1 + N_months_post_id2 + N_months_post_180_2"))
+
+  # Determine if the mediator is binary 
+  distinct_vals <- mod_data %>% 
+    select(!!sym(mediator)) %>% 
+    n_distinct()
+
+
+  # If the mediator is binary use glm(), otherwise use lm()
+  if (distinct_vals == 2) {
+    med_mod <- glm(part1_formula, data = mod_data, family = binomial)
+  } else if (mediator == "Engagement") {
+    med_mod <- glm(part1_formula, data = mod_data, family = poisson)
+  }
+    
+  tab <- 
+    tbl_regression(med_mod, estimate_fun = ~style_sigfig(., digits = 4)) %>%
+    as_gt() %>% 
+    gt::as_word()
+  
+  # Display table in word -----------------------------------------------------
+  cat("```{=openxml}", tab, "```", sep = "\n")
+
+  cat("### ", mediator, "Part2: Outcome Model", "\n\n")
+  # PART 2: Model the outcome adjusting for the mediator
+  part2_formula <- as.formula(str_c("Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + slope1 + ", mediator, " + N_months_post_id1 + N_months_post_180_1 + N_months_post_id2 + N_months_post_180_2"))
+
+  out_mod <-  lm(part2_formula, data = mod_data)
+
+  tab2 <- 
+    tbl_regression(out_mod, estimate_fun = ~style_sigfig(., digits = 4)) %>%
+    as_gt() %>% 
+    gt::as_word()
+
+  # Display table in word -----------------------------------------------------
+  cat("```{=openxml}", tab2, "```", sep = "\n")
+
+
+  # Mediator and Intervention -------------------------------------------------
+  cat("### " , "Mediator and Intervention")
+  
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "slope1", mediator = mediator, sims = n_sims)
+  
+  output <- extract_mediation_summary(summary(med_fit)) 
+  
+  mtab <- format_mediation(output)
+  
+  print(knitr::kable(mtab))
+  
+  cat("\n\n")
+
+
+  # Mediator and N_months_post_id in the intervention phase ---------------
+  cat("### " , "Mediator and N_months_post_id in the intervention phase")
+
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_id1", mediator = mediator, sims = n_sims)
+
+  output <- extract_mediation_summary(summary(med_fit))
+
+  mtab <- format_mediation(output)
+  
+  print(knitr::kable(mtab))
+
+  cat("\n\n")
+
+
+  # Mediator and N_months_post_id in the intervention phase ---------------
+  cat("### " , "Mediator and N_months_post_180 in the intervention phase")
+
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_180_1", mediator = mediator, sims = n_sims)
+  
+  output <- extract_mediation_summary(summary(med_fit))
+
+  mtab <- format_mediation(output)
+
+  print(knitr::kable(mtab))
+
+  cat("\n\n")
+
+
+
+  # Mediator and N_months_post_id in the control phase --------------------
+  cat("### " , "Mediator and N_months_post_id in the control phase")
+  
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_id2", mediator = mediator, sims = n_sims)
+  
+  output <- extract_mediation_summary(summary(med_fit))
+
+  mtab <- format_mediation(output)
+
+  print(knitr::kable(mtab))
+
+  cat("\n\n")
+
+  # Mediator and N_months_post_180 in the control phase -----------------------
+  cat("### " , "Mediator and N_months_post_180 in the control phase")
+  
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_180_2", mediator = mediator, sims = n_sims)
+  
+  output <- extract_mediation_summary(summary(med_fit))
+
+  mtab <- format_mediation(output)
+
+  print(knitr::kable(mtab))
+
+  cat("\n\n")
+}
+```
+

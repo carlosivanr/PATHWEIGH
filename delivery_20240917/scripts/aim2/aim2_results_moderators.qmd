@@ -1,0 +1,256 @@
+---
+title: "Aim 2: Moderators"
+format:
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+
+# format:
+#   html:
+#     toc: true
+#     embed-resources: true
+
+execute: 
+  echo: false
+---
+
+```{r}
+# *****************************************************************************
+# Carlos Rodriguez, PhD. CU Anschutz Dept. of Family Medicine.
+# aim2_results_moderators
+
+# The purpose of this script is to display the output from a series of
+# moderator models for PATHWEIGH AIM 2.
+# *****************************************************************************
+```
+
+```{r}
+library(magrittr, include.only = "%<>%")
+pacman::p_load(tidyverse,
+               gtsummary)
+```
+
+
+```{r}
+data <- read_csv( 
+          file = "D:/PATHWEIGH/delivery_20240917/data/aim2_data_20240917.csv",
+          show_col_types = FALSE)
+```
+
+
+```{r}
+# Rescale patient level predictors %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+pt_rscl <- data %>% 
+  filter(IndexVisit == 1) %>%
+  select(Arb_PersonId, Intervention, BMI_bl, PHQ9, GAD7) %>%
+  group_by(Intervention) %>%
+  mutate(across(BMI_bl:GAD7, ~ scale(.x)[, 1])) %>%
+  ungroup()
+
+# Rename the columns
+colnames(pt_rscl) <- c("Arb_PersonId", "Intervention", "BMI_bl_rscl", "PHQ9_rscl", "GAD7_rscl")
+```
+
+
+```{r, eval = FALSE}
+# How many people are missing PHQ9
+pt_rscl %>% 
+  filter(is.na(PHQ9_rscl)) %>%
+  group_by(Intervention) %>%
+  count() %>%
+  ungroup()
+
+# How many people are missing GAD7
+pt_rscl %>% 
+  filter(is.na(GAD7_rscl)) %>%
+  group_by(Intervention) %>%
+  count() %>%
+  ungroup()
+```
+
+
+```{r}
+pt_rscl %<>% 
+  select(Arb_PersonId, Intervention, BMI_bl_rscl)
+
+# Merge back into data
+data %<>%
+  left_join(., pt_rscl, by  = c("Arb_PersonId", "Intervention"))
+```
+
+
+```{r}
+# Rescale provider level characteristics %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+prov_yrs_prac <- data %>%
+  group_by(ProviderNpi) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(ProviderNpi, Years_in_prac) %>%
+  mutate(Years_in_prac_rscl = scale(Years_in_prac)[, 1]) %>%
+  select(-Years_in_prac)
+
+data %<>%
+  left_join(., prov_yrs_prac, by = "ProviderNpi")
+```
+
+
+```{r}
+# Recale clinic level predictors %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+medicaid_rscl <- data %>%
+  group_by(DepartmentExternalName, Intervention) %>%
+  slice_head() %>%
+  select(DepartmentExternalName, Intervention, percent_medicaid) %>%
+  arrange(DepartmentExternalName) %>%
+  ungroup() %>%
+  group_by(Intervention) %>%
+  mutate(Percent_medicaid_per_phase_rscl = scale(percent_medicaid)[, 1]) %>%
+  ungroup() %>%
+  select(-percent_medicaid)
+
+vol_per_year_rscl <- data %>%
+  group_by(DepartmentExternalName, Year) %>%
+  slice_head() %>%
+  select(DepartmentExternalName, Year, Pt_vol_per_year) %>%
+  ungroup() %>%
+  group_by(Year) %>%
+  mutate(Pt_vol_per_yr_rscl = scale(Pt_vol_per_year)[, 1]) %>%
+  ungroup() %>%
+  select(-Pt_vol_per_year)
+
+data %<>%
+  left_join(., medicaid_rscl, by = c("DepartmentExternalName", "Intervention")) %>%
+  left_join(., vol_per_year_rscl, by = c("DepartmentExternalName", "Year"))
+```
+
+
+```{r}
+# Create the modeling data frame %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+mod_data <- data %>% filter(IndexVisit != 1)
+
+mod_data %<>%
+  mutate(Arb_PersonId = factor(Arb_PersonId))
+
+mod_data %<>%
+  mutate(Race_Ethnicity = relevel(factor(Race_Ethnicity), ref = "Non-Hispanic White")) %>%
+  mutate(Age_cat = relevel(factor(Age_cat), ref = "45-60")) %>%
+  mutate(Years_in_prac_cat = relevel(recode_factor(Years_in_prac_cat, 
+                                      "(0,4]" = "0-4",
+                                      "(4,8]" = "4-8",
+                                      "(8,12]" = "8-12",
+                                      "(12,16]" = "12-16",
+                                      "(16,20]" = "16-20",
+                                      .default = "Unknown"), ref = "8-12"))
+
+mod_data %<>%                                    
+  mutate(Provider_Gender_Code = factor(
+      ifelse(Provider_Gender_Code == "X", "Unknown", Provider_Gender_Code))) %>%
+  mutate(Provider_Gender_Code = relevel(Provider_Gender_Code, ref = "F"))
+
+# Convert the N_days_post_* variables to N_months_post_* by dividing days by 30
+# should be equivalent to multiplying the parameter estimates of N_days_post_*
+# by 30 in the output table, but much easier to work with. Otherwise it is a 
+# challenge to modify tidy() or tbl_regression() output for display in a word
+# or .html document.
+mod_data %<>%
+  mutate(N_months_post_id = N_days_post_id / 30,
+         N_months_post_180 = N_days_post_180 / 30)
+```
+
+```{r}
+moderators <- 
+c(
+"Age_cat",
+"Sex",
+"Race_Ethnicity",
+"Insurance",
+"BMI_bl_rscl", #rescaled to address predictor on difference scales warning
+"EOSS",
+"Former_Smoker",
+# "PHQ9_rscl", #rescaled to address predictor on difference scales warning
+# "GAD7_rscl", #rescaled to address predictor on difference scales warning
+"Provider_Gender_Code", #rescaled to address predictor on difference scales warning
+"Years_in_prac_cat",
+"FMphys",
+"IMphys",
+"OTHphys",
+"FMAPP",
+"IMAPP",
+"OTHAPP",
+"Pt_vol_per_yr_rscl",  #rescaled to address predictor on difference scales warning
+"Percent_medicaid_per_phase_rscl", #0 (non-NA) cases  #rescaled to address predictor on difference scales warning
+"avg_fte" # over 20% of providers have cFTE less than .10, which questions the validity of the varaible.
+)
+```
+
+
+```{r}
+#| results: 'asis'
+#| echo: false
+
+
+for (m in 1:length(moderators)) {
+  cat("## ", moderators[m], "\n")
+
+  # Leigh wanted to exclude all provider with fte less than .20
+  # Will need to remove any patients with just one follow up visits in one
+  # phase
+  if (moderators[m] == "avg_fte") {
+    modeling_data_set <- mod_data %>% filter(avg_fte > .20)
+
+    # Keep those with visits in both control and intervention
+    # reduces number of patients to 8,856 from 9,358
+    patient_ids <-
+    modeling_data_set %>%
+      group_by(Arb_PersonId) %>%
+      summarise(n_distinct_int = n_distinct(Intervention)) %>%
+      filter(n_distinct_int == 2)
+
+    modeling_data_set %<>%
+      filter(Arb_PersonId %in% patient_ids$Arb_PersonId)
+
+  } else {
+    modeling_data_set <- mod_data
+  }
+
+  # print(moderators[m])
+  formula <- as.formula(str_c("Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + slope1 + ",
+
+          moderators[m], " + slope1:", moderators[m], 
+
+          #piecewise terms          
+          " + slope1:N_months_post_id + slope1:N_months_post_180 + slope2:N_months_post_id + slope2:N_months_post_180 + ",
+
+          #moderator terms slope1:moderators[m] + slope2:moderator + moderators[m]
+          "slope1:N_months_post_id:", moderators[m], " + slope2:N_months_post_id:", moderators[m], " + slope1:N_months_post_180:", moderators[m], " + slope2:N_months_post_180:", moderators[m], " + ",    
+          #clustering term
+          "(1| Arb_PersonId)"))
+
+  model <- lmerTest::lmer(formula, data = modeling_data_set)
+
+  tab <- model %>% 
+    tbl_regression(., estimate_fun = ~style_sigfig(., digits = 4)) %>%
+    as_gt() %>% 
+    gt::as_word()
+
+  # Print a word gt table object in a for-loop
+  cat("```{=openxml}", tab, "```", sep = "\n")
+  
+  cat("\n\n")
+}
+```
+
+```{r, eval = FALSE, echo = FALSE}
+# Testing model to see what happens when Age_cat is entered twice.
+# Results, only one term is used has benign effects, for-loop should work just fine
+lmerTest::lmer(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + slope1 + Age_cat +
+
+          #piecewise terms          
+          slope1:N_days_post_id + slope1:N_days_post_180 + slope2:N_days_post_id + slope2:N_days_post_180 + 
+
+          #moderator terms slope1:moderators[m] + slope2:moderator + moderators[m]
+          slope1:N_days_post_id:Age_cat + slope2:N_days_post_id:Age_cat + slope1:N_days_post_180:Age_cat + slope2:N_days_post_180:Age_cat +    
+          
+          #clustering term
+          (1| Arb_PersonId),
+          
+          data = mod_data)
+```
