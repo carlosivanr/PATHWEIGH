@@ -18,163 +18,337 @@
 # %% Load libraries --------------------------------------------------------------
 library(magrittr, include = "%<>%")
 pacman::p_load(tidyverse,
-                gtsummary)
+               gtsummary,
+               here,
+               furrr,
+               openxlsx)
 
 
-# Start with the visits data frame
-# - visits will have an index date set for those that were ee and ene
-# - visits also has an Eligible (18age/25bmi variable) and Enrolled (weight prioritized visit) variable
-# - for both ee and ene visits, the index visit must have a provider npi
-# - *** Will need to re-engineer the index visit
-# - *** Re-engineer the Eligible and Enrolled variables
+# Specify parameters -----------------------------------------------------------
+RData <- "20240917.RData" # Used as an out to write files
+# Set data delivery date as numerical
+data_delivery_date <- 20240917
 
-# %% Load functions -----------------------------------------------------------
-# *** Will need to load the new set_index_date_ee_ene.R function
+# For the proc_ene script
+date_min <- as.Date("2020-03-17")
+date_max <- as.Date(lubridate::ymd(data_delivery_date))
+
+# Set the path to the emr_data_processing directory to load scripts/functions
+# that are shared along all separate data deliveries
+proj_root_dir <- str_c("delivery_", data_delivery_date)
+proj_parent_dir <- str_remove(here(), proj_root_dir)
+emr_dir <- str_c(proj_parent_dir, "/emr_data_processing/")
+
 
 # %% Load the visits data frame -----------------------------------------------
 load("D:/PATHWEIGH/delivery_20240917/data/all_visits_20240917.RData")
 
 # Drop IndexDate, Eligible, and Enrolled columns, so that the new function can
-# be applied
+# be applied to re-assign the IndexDates
 visits %<>%
   select(-IndexDate, -IndexVisit, -Cohort, -Eligible, -Enrolled)
 
 # Redefines the index date, only for the EE -----------------------------------
 # Will also filter out rows without a weight and the not eligible not enrolled
-# patients
-visits <- set_index_date_ee_ene(visits)
+# patients (NENE)
+source("D:\\PATHWEIGH\\emr_data_processing\\subscripts\\set_index_date_ee_ene.R")
+ee_ene <- set_index_date_ee_ene(visits)
 
 
-## LEFT OFF HERE ****************************************************************
-## Determine if the labs, procedures, need to be calculated for the new shifted
-# index dates for the Eligible and Enrolled people
+## First prep the ee_ene data ----
+source("D:\\PATHWEIGH\\emr_data_processing\\subscripts\\prep_ee_ene.R")
+source("D:\\PATHWEIGH\\emr_data_processing\\subscripts\\censor_visits.R")
+source("D:\\PATHWEIGH\\emr_data_processing\\subscripts\\set_last_visit.R")
+source("D:\\PATHWEIGH\\emr_data_processing\\subscripts\\any_pw_visit.R")
+
+ee_ene <- prep_ee_ene(ee_ene)
+
+
+# Set data_file to the processed ee_ene data which contains all of the
+# labs procedures, comorbidities, etc. if already processed.
+data_file <- here(
+  str_c("delivery_", data_delivery_date),
+  "data",
+  str_c("processed_ee_ene_aim3_", RData))
+
+
+# If processed data exists, load it and merge it with the previous step's data
+# in the pipeline. Otherwise process the data and store it for future use.
+if (file.exists(data_file)) {
+  # processed ee_ene data is saved as proc_ee_ene.Rdata. In order to avoid,
+  # naming confusiong with proc_ee_ene() function. The following function
+  # allows to load proc_ee_ene.RData as processed_ee_ene in the workspace.
+
+  source("D:/PATHWEIGH/emr_data_processing/functions/load_rdata.R")
+
+  # Load the processed ee_ene, that already has labs, procedures, and
+  # comorbidities to avoid capturing them again when the script is run
+  processed_ee_ene <- load_rdata(data_file)
+
+  # If all of the encounters in ee_ene are in processed_ee_ene, then merge in
+  # the labs, procedures, referrals, eoss, and comorbidities.
+  if (all.equal(sort(ee_ene$Arb_EncounterId), sort(processed_ee_ene$Arb_EncounterId))) { # nolint: line_length_linter.
+    
+    # Load the column names that were added if the comorbidities were processed
+    # previously processed. This will ensure that the column names that will be
+    # merged will match with downstream steps
+    load("D:/PATHWEIGH/delivery_20240917/data/new_col_names_aim3_20240917.RData")
+
+    ee_ene <-
+      left_join(ee_ene,
+                (processed_ee_ene %>%
+                   select(Arb_PersonId,
+                          Arb_EncounterId,
+                          EncounterDate, all_of(new_col_names))),
+                by = c("Arb_PersonId", "Arb_EncounterId", "EncounterDate"))
+  } else {
+    stop("Not all visits in the input data frame match data that was previously processed. Review code.") # nolint: line_length_linter.
+  }
+
+} else {
+
+  # Capture labs, meds, procedures -------------------------------------
+  source("D:\\PATHWEIGH\\emr_data_processing\\functions\\read_pw_csv.R")
+  plan(multisession, workers = 4)
+
+  # Set the max globals size to 10 GB
+  options(future.rng.onMisuse = "ignore",
+          future.globals.maxSize = (10 * 1024^3))
+
+  # PROC LABS MEDS PROCEDURES --------------------------------------------------
+  # *** n.b. meds, bariatric procedures, and referrals captured at the last
+  # visit are not valid, because their time window to capture these metrics is
+  # from the date of the last visit to either the cross over date for control
+  # phase visits, or 9-16-2024 for the intervention visits. Remnants of changes
+  # to data capturing definitions made after an initial version.
+
+  # Get the names before processing to be able to capture which columns were
+  # added
+  names_1_pre <- names(ee_ene)
+
+  source(str_c(emr_dir, "subscripts/proc_labs_meds.R"))
+  invisible(gc())
+  ee_ene <- proc_labs_meds(ee_ene)
+
+  # Get the names after processing to get the new columns
+  names_1_post <- names(ee_ene)
+
+  # Get the difference of the new names added to get the added columns
+  names_1 <- names_1_post[!names_1_post %in% names_1_pre]
+
+  # PROC EOSS ------------------------------------------------------------------
+  names_2_pre <- names_1_post
+  source(str_c(emr_dir, "subscripts/proc_eoss.R"))
+  invisible(gc())
+  ee_ene <- proc_eoss(ee_ene)
+
+  names_2_post <- names(ee_ene)
+
+  names_2 <- names_2_post[!names_2_post %in% names_2_pre]
+
+  # PROC COMORBIDITIES ---------------------------------------------------------
+  names_3_pre <- names_2_post
+
+  source(str_c(emr_dir, "subscripts/proc_comorbidities.R"))
+  invisible(gc())
+  ee_ene <- proc_comorbidities(ee_ene)
+
+  names_3_post <- names(ee_ene)
+
+  names_3 <- names_3_post[!names_3_post %in% names_3_pre]
+
+  # Save processed ee_ene added columns only for future use to merge in
+  # labs, meds, procedures, eoss, and comorbidities
+
+  # Collect all of the added column names and select them along with the
+  # Arb_PersonId, Arb_EncounterId, and EncounterDate
+  new_col_names <- c(names_1, names_2, names_3)
+
+
+  # Save the output to avoid having to re-process the labs & comorbidities
+  processed_ee_ene <-
+    ee_ene %>%
+    select(Arb_PersonId, Arb_EncounterId, EncounterDate,
+            all_of(new_col_names))
+
+  # save new_col_names
+  save(new_col_names,
+        file = here(str_c("delivery_", data_delivery_date),
+                    "data",
+                    str_c("new_col_names_aim3_", RData)))
+
+  # save processed ee_ene
+  save(processed_ee_ene,
+        file = here(str_c("delivery_", data_delivery_date),
+                    "data",
+                    str_c("processed_ee_ene_aim3_", RData)))
+
+  rm(processed_ee_ene)
+
+}
+
 
 # Create variables for days since first weight measurement and days since
 # the first weight prioritized visit for the Eligible and Enrolled people only
 # The eligible not enrolled patients will get zeros for number of days since
 # wpv
 
-# # Load the 2024-09-17 data set ------------------------------------------------
-# source("D:/PATHWEIGH/emr_data_processing/functions/load_rdata.R")
+# Load the 2024-09-17 data set ------------------------------------------------
+source("D:/PATHWEIGH/emr_data_processing/functions/load_rdata.R")
 
-# # Load the processed ee_ene, that already has labs, procedures, and
-# # comorbidities to avoid capturing them again when the script is run
+# Load the processed ee_ene, that already has labs, procedures, and
+# comorbidities to avoid capturing them again when the script is run
 # data_file <- "D:/PATHWEIGH/delivery_20240917/data/ee_ene_20240917.RData"
 
-# data <- load_rdata(data_file)
+data <- ee_ene
 
-# # Get the minimum date to ensure the visits are from 03-17-2020 and beyond
-# min(data$EncounterDate)
+# Get the minimum date to ensure the visits are from 03-17-2020 and beyond
+min(data$EncounterDate)
 
-# # Get the maximum index date
-# data %>%
-#   filter(IndexVisit == 1) %>%
-#   select(EncounterDate) %>%
-#   summarise(max = max(EncounterDate))
+# Get the maximum index date
+data %>%
+  filter(IndexVisit == 1) %>%
+  select(EncounterDate) %>%
+  summarise(max = max(EncounterDate))
 
-# # Get the number of patients where the index date is beyond 03/16/2024
-# # There are 7,467 unique patients with an index date beyond 03/16/2024
-# data %>%
-#   filter(IndexVisit ==1, EncounterDate >= "2024-03-16") %>%
-#   select(Arb_PersonId) %>%
-#   distinct()
+# Get the number of patients where the index date is beyond 03/16/2024
+# There are 6,888 unique patients with an index date beyond 03/16/2024
+data %>%
+  filter(IndexVisit ==1, EncounterDate >= "2024-03-16") %>%
+  select(Arb_PersonId) %>%
+  distinct()
 
-# # Filter out visits where a weight is not recorded ----------------------------
-# data %<>%
-#   drop_na(Weight_kgs)
+# Subsequent visits can occur up to 09-17-2024, but the index date needs
+# to be before 03-17-2024
+data %<>%
+  filter(IndexDate <= "2024-03-16")
 
-# # Drop visits without an NPI? -------------------------------------------------
-# data %<>%
-#   drop_na(ProviderNpi)
+# Capture the patient ids that have 2 or more visits in the control phase
+con_ids <- 
+  data %>%
+  filter(Intervention.factor == "Control") %>%
+  group_by(Arb_PersonId) %>%
+  count() %>%
+  ungroup() %>%
+  filter(n > 1) %>%
+  pull(Arb_PersonId)
 
-# # Ensure everyone has a follow up weight value --------------------------------
-# ids_to_keep <- data %>%
-#   group_by(Arb_PersonId) %>%
-#   count() %>%
-#   filter(n > 1) %>%
-#   pull(Arb_PersonId)
+# Capture the patient ids that have 2 or more visits in the intervention phase
+int_ids <- 
+  data %>%
+  filter(Intervention.factor == "Intervention") %>%
+  group_by(Arb_PersonId) %>%
+  count() %>%
+  ungroup() %>%
+  filter(n > 1) %>%
+  pull(Arb_PersonId)
 
-# data %<>%
-#   filter(Arb_PersonId %in% ids_to_keep)
+# Filter data to only those that have 2 visits in at least one phase
+data %>%
+  filter(Intervention.factor == "Control" & Arb_PersonId %in% con_ids |
+         Intervention.factor == "Intervention" & Arb_PersonId %in% int_ids) %>%
+  group_by(Arb_PersonId, Intervention.factor) %>%
+  count() %>%
+  arrange(Arb_PersonId)
 
-# # After those with at least one subsequent visit are removed
-# # the ENE for ene drops to 206,365
-# # Does not change when removing individuals with index dates without a ProviderNpi
-# data %>%
-#   filter(EE == 0) %>%
-#   group_by(Arb_PersonId) %>%
-#   arrange(EncounterDate) %>%
-#   slice_head() %>%
-#   ungroup() %>%
-#   nrow()
+data %<>%
+  filter(Intervention.factor == "Control" & Arb_PersonId %in% con_ids |
+         Intervention.factor == "Intervention" & Arb_PersonId %in% int_ids)
 
-# # Create WP_Visit -------------------------------------------------------------
-# # Identifies visits that were weight-prioritized meaning they were flagged for
-# # delivering some type of care for weight
-# data %<>%
-#   mutate(WP_Visit = ifelse(WPV > 0, 1, 0))
+# After those with at least one subsequent visit are removed
+# the ENE for ene drops to 183,060
+data %>%
+  filter(Enrolled == 0) %>%
+  group_by(Arb_PersonId) %>%
+  arrange(EncounterDate) %>%
+  slice_head() %>%
+  ungroup() %>%
+  nrow()
 
-# table(data$WP_Visit, useNA ="ifany")
+# Create WP_Visit -------------------------------------------------------------
+# Identifies visits that were weight-prioritized meaning they were flagged for
+# delivering some type of care for weight
+data %<>%
+  mutate(WP_Visit = ifelse(WPV > 0, 1, 0))
 
-# # Create PW_Visit -------------------------------------------------------------
-# # Identifies anyone who had a pathweigh visit
-# data %<>% 
-#   mutate(PW_Visit = if_else(WPV_WMQ == 1 | WPV_IP == 1 | WPV_TH == 1 | WPV_smart == 1, 1, 0))
+table(data$WP_Visit, useNA ="ifany")
 
-# # Create a variable to indicate if it is a subsequent WPV ---------------------
-# # First create a data frame where the input is grouped, then arranged by date,
-# # then the row number is added. The first WPV is initially set to 1, so any row
-# # that = 1 is set to 0, else it is set to 1 to indicate a subsequent WPV. Then
-# # select only the Arb_EncounterId and subsequent WPV indicator.
-# subsequent_wpv <-
-#   data %>% 
-#   filter(WPV > 0) %>%
-#   select(Arb_PersonId, Arb_EncounterId, EncounterDate, WPV) %>%
-#   group_by(Arb_PersonId) %>% 
-#   arrange(EncounterDate) %>%
-#   mutate(subsequent_WPV = row_number()) %>%
-#   ungroup() %>%
-#   mutate(subsequent_WPV = ifelse(subsequent_WPV == 1, 0, 1)) %>%
-#   select(Arb_EncounterId, subsequent_WPV)
+# Create PW_Visit -------------------------------------------------------------
+# Identifies anyone who had a pathweigh visit
+data %<>% 
+  mutate(PW_Visit = if_else(WPV_WMQ == 1 | WPV_IP == 1 | WPV_TH == 1 | WPV_smart == 1, 1, 0))
 
-# # Merge the subsequent WPV indicator by Arb_EncounterId
-# data <-
-#   left_join(data,
-#             subsequent_wpv,
-#             by = "Arb_EncounterId")
+# Create a variable to indicate if it is a subsequent WPV ---------------------
+# First create a data frame where the input is grouped, then arranged by date,
+# then the row number is added. The first WPV is initially set to 1, so any row
+# that = 1 is set to 0, else it is set to 1 to indicate a subsequent WPV. Then
+# select only the Arb_EncounterId and subsequent WPV indicator.
+subsequent_wpv <-
+  data %>% 
+  filter(WPV > 0) %>%
+  select(Arb_PersonId, Arb_EncounterId, EncounterDate, WPV) %>%
+  group_by(Arb_PersonId) %>% 
+  arrange(EncounterDate) %>%
+  mutate(subsequent_WPV = row_number()) %>%
+  ungroup() %>%
+  mutate(subsequent_WPV = ifelse(subsequent_WPV == 1, 0, 1)) %>%
+  select(Arb_EncounterId, subsequent_WPV)
 
-# # After merging, visits that were not WPVs will have a missing value. Set these
-# # rows to 0 to indicate they were not a subsequent wpv.
-# data %<>%
-#   mutate(subsequent_WPV = ifelse(is.na(subsequent_WPV), 0, subsequent_WPV))
+# Merge the subsequent WPV indicator by Arb_EncounterId
+data <-
+  left_join(data,
+            subsequent_wpv,
+            by = "Arb_EncounterId")
 
-# # Check for NAs in the newly created variables
-# table(data$subsequent_WPV, useNA = "ifany")
-# table(data$PW_Visit, useNA = "ifany")
-# table(data$WP_Visit, useNA = "ifany")
+# After merging, visits that were not WPVs will have a missing value. Set these
+# rows to 0 to indicate they were not a subsequent wpv.
+data %<>%
+  mutate(subsequent_WPV = ifelse(is.na(subsequent_WPV), 0, subsequent_WPV))
 
-# # Check if the cohort variable is time invariant
-# # Some will need to be assigned to a cohort if cohort is to be used
-# # *** go back and remove Cohort from Visits, then fillna()
-# data %>%
-#   group_by(Arb_PersonId) %>%
-#   summarise(n_cohorts = n_distinct(Cohort)) %>%
-#   filter(n_cohorts > 1)
+# Check for NAs in the newly created variables. There should not be any NAs
+table(data$subsequent_WPV, useNA = "ifany")
+table(data$PW_Visit, useNA = "ifany")
+table(data$WP_Visit, useNA = "ifany")
 
-
-# # Create eligible and enrolled ------------------------------------------------
-# table(data$EE, useNA = "ifany")
-
-# # Not needed if we are not using visits before the index
-# # data %<>%
-# #   group_by(Arb_PersonId) %>%
-# #   fill(EE, .direction = "updown") %>%
-# #   ungroup()
+# Check if the cohort variable is time invariant
+# Some will need to be assigned to a cohort if cohort is to be used
+# *** go back and remove Cohort from Visits, then fillna()
+data %>%
+  group_by(Arb_PersonId) %>%
+  summarise(n_cohorts = n_distinct(Cohort)) %>%
+  filter(n_cohorts > 1)
 
 
-# # Create a table 1 to compare ee_ene
-# data %<>%
-#   arrange(Arb_PersonId, EncounterDate)
+# Create eligible and enrolled ------------------------------------------------
+data %<>%
+  mutate(EE = ifelse(Eligible == 1 & Enrolled == 1, 1, 0))
+
+table(data$EE, useNA = "ifany")
+
+# Create N_days_since_id and N_days_since_wpv----------------------------------
+enrollment_dates <- data %>%
+  filter(Enrolled == 1, WP_Visit == 1) %>%
+  arrange(Arb_PersonId, Intervention.factor, EncounterDate) %>%
+  group_by(Arb_PersonId, Intervention.factor) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(Arb_PersonId, Intervention.factor, EncounterDate) %>%
+  mutate(EnrollmentDate = EncounterDate) %>%
+  select(-EncounterDate)
+
+data %<>%
+  left_join(., enrollment_dates, by = c("Arb_PersonId", "Intervention.factor"))
+
+names(data)
+
+data %<>%
+  # tail() %>%
+  mutate(N_days_post_id = as.numeric(EncounterDate - IndexDate)) %>%
+  mutate(N_days_post_wpv = as.numeric(EncounterDate - EnrollmentDate)) %>%
+  # select(Arb_PersonId, EncounterDate, IndexDate, EnrollmentDate, 
+        #  Intervention.factor, N_days_post_id, N_days_post_wpv) %>%
+  # filter(is.na(N_days_post_wpv)) %>%
+  mutate(N_days_post_wpv = if_else(is.na(N_days_post_wpv), 0, N_days_post_wpv))
 
 # data %>%
 #   group_by(Arb_PersonId) %>%
@@ -189,130 +363,4 @@ visits <- set_index_date_ee_ene(visits)
 #   as_gt() %>%
 #   gt::gtsave(
 #     filename = "D:/PATHWEIGH/delivery_20240917/scripts/ee_ene_draft.docx"
-#   )
-
-# # For the EE, come up with a different Index visit algorithm ------------------
-# # 1. --------------------------------------------------------------------------
-# # Load the all_visits data frame to get the visits that are not in ee_ene
-# load("D:/PATHWEIGH/delivery_20240917/data/all_visits_20240917.RData")
-
-# # Reload data frame because we want to change the group in EE
-# data <- load_rdata(data_file)
-
-# # Keep only the visits from the ee_ene patients
-# visits %<>%
-#   filter(Arb_PersonId %in% data$Arb_PersonId)
-
-# # 2. Drop any visits with missing weight
-# visits %<>%
-#   drop_na(Weight_kgs)
-
-# # 3. Assign the EE variable
-# visits %<>%
-#   mutate(EE = ifelse(Arb_PersonId %in% (data %>% filter(EE == 1) %>% select(Arb_PersonId) %>% distinct() %>% pull(Arb_PersonId)), 1, 0))
-
-# visits %<>%
-#   arrange(Arb_PersonId, EncounterDate)
-
-# # 4. Check ene in visits vs ene in data 
-# # 277,242 at this point
-# visits %>%
-#   filter(EE == 0) %>%
-#   select(Arb_PersonId) %>%
-#   distinct() %>%
-#   nrow()
-
-# data %>%
-#   filter(EE == 0) %>%
-#   # drop_na(Weight_kgs) %>%
-#   select(Arb_PersonId) %>%
-#   distinct() %>%
-#   nrow()
-
-
-# # 5. Split the data frame into ee and ene, and work on EE ONLY
-# ee <- visits %>% filter(EE == 1)
-# ene <- visits %>% filter(EE == 0)
-
-# # 6. Redefine the index eligible variable to include any visit that meets criteria
-# ee %<>%
-#   mutate(IndexVisitEligible = ifelse(Age >= 18 & BMI >= 25, 1, 0),
-#          IndexVisitEligible = ifelse(is.na(IndexVisitEligible),
-#                                      0, IndexVisitEligible)
-# )
-
-# ee %<>%
-#   mutate(IndexVisitEligible = ifelse(is.na(ProviderNpi), 0, IndexVisitEligible),
-#          IndexVisitEligible = ifelse(is.na(Weight_kgs), 0, IndexVisitEligible))
-
-# # 7. filter data by index eligible visits, Group data by Arb_PersonId, sort by 
-# # encounter date, slice head, pull Arb_EncounterId and save (These will be the
-# # encounter ids of the index visits)
-# index_visits_ee <- ee %>%
-#   filter(IndexVisitEligible == 1) %>%
-#   group_by(Arb_PersonId) %>%
-#   slice_head() %>%
-#   pull(Arb_EncounterId)
-
-# # 8. Set the index visit if the Arb_EncounterId is in the pulled vector of Arb_EncounterIds
-# ee %<>%
-#   mutate(IndexVisit = ifelse(Arb_EncounterId %in% index_visits_ee, 1, 0))
-
-# # 9. Set the IndexDate as that of the new IndexVisit's Encounter Date, then filter
-# # visits to only those on or after the IndexDate
-# ee %<>%
-#   mutate(IndexDate = ifelse(IndexVisit == 1, as.character(EncounterDate), NA)) %>%
-#   group_by(Arb_PersonId) %>%
-#   fill(IndexDate, .direction = "down") %>%
-#   ungroup() %>%
-#   # select(Arb_PersonId, Arb_EncounterId, EncounterDate, IndexVisitEligible, IndexVisit, IndexDate) %>%
-#   filter(EncounterDate >= IndexDate)
-
-# # 10. Restack the EE and ENE subsets
-# ee %<>% 
-#   mutate(IndexDate = as.Date(IndexDate))
-
-# # Filter the encounter Ids for those in data where EE == 0
-# ene %<>% 
-#   filter(Arb_EncounterId %in% (data %>% filter(EE == 0) %>% pull(Arb_EncounterId)))
-
-# # Create a new data frame with the redefined indexes
-# redef_index <- bind_rows(ee, ene)
-
-
-# # Then see which patients have a subsequent visit
-# # Ensure everyone has a follow up weight value --------------------------------
-# ids_to_keep <- redef_index %>%
-#   group_by(Arb_PersonId) %>%
-#   count() %>%
-#   filter(n > 1) %>%
-#   pull(Arb_PersonId)
-
-# # Filter data by those patients that have a subsequent visit and tabulates
-# redef_index %<>%
-#   filter(Arb_PersonId %in% ids_to_keep)
-
-# # Check so see how many are in the redef_index data frame
-# redef_index %>%
-#   filter(EE == 0) %>%
-#   # drop_na(Weight_kgs) %>%
-#   select(Arb_PersonId) %>%
-#   distinct() %>%
-#   nrow()
-
-
-# # SO FAR THINGS LOOK GOOD
-# redef_index %>%
-#   group_by(Arb_PersonId) %>%
-#   arrange(EncounterDate) %>%
-#   slice_head() %>%
-#   ungroup() %>%
-#   select(Age, Weight_kgs, Sex, Race_Ethnicity, Insurance, BMI,
-#          Systolic_blood_pressure, Diastolic_blood_pressure, EE) %>%
-#   mutate(EE = ifelse(EE == 1, "EE", "ENE")) %>%
-#   tbl_summary(by = "EE",
-#               statistic = list(all_continuous() ~ c("{mean} ({sd})"))) %>%
-#   as_gt() %>%
-#   gt::gtsave(
-#     filename = "D:/PATHWEIGH/delivery_20240917/scripts/ee_ene_redefined_index_draft.docx"
 #   )
