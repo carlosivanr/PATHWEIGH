@@ -1,0 +1,73 @@
+---
+title: "Aim2: Forest Plots"
+format: docx
+echo: false
+---
+
+```{r}
+library(magrittr, include.only = "%<>%")
+pacman::p_load(tidyverse,
+               openxlsx,
+               forestplot,
+               gtsummary)
+```
+
+## Control 0-6 Months
+```{r, fig.dpi = 600, fig.width=6.5, fig.height=7}
+data <- read.xlsx("D:\\PATHWEIGH\\delivery_20240917\\scripts\\aim2\\forest_plot_data.xlsx", 1)
+
+data %<>%
+  separate(., ci, sep = ", ", into = c("lower", "upper")) %>%
+  mutate(mean = difference) %>%
+  mutate(across(lower:upper, ~ as.numeric(.x)))
+
+data %>%
+  forestplot(labeltext = c(moderator,)) %>%
+  fp_add_header(moderator = "Moderator") %>%
+  fp_set_zebra_style("#EFEFEF")
+```
+
+## Control 6-18 Months
+```{r, fig.dpi = 600, fig.width=6.5, fig.height=7}
+data <- read.xlsx("D:\\PATHWEIGH\\delivery_20240917\\scripts\\aim2\\forest_plot_data.xlsx", 2)
+
+data %<>%
+  separate(., ci, sep = ", ", into = c("lower", "upper")) %>%
+  mutate(mean = difference) %>%
+  mutate(across(lower:upper, ~ as.numeric(.x)))
+
+data %>%
+  forestplot(labeltext = c(moderator,)) %>%
+  fp_add_header(moderator = "Moderator") %>%
+  fp_set_zebra_style("#EFEFEF")
+```
+
+## Intervention 0-6 Months
+```{r, fig.dpi = 600, fig.width=6.5, fig.height=7}
+data <- read.xlsx("D:\\PATHWEIGH\\delivery_20240917\\scripts\\aim2\\forest_plot_data.xlsx", 3)
+
+data %<>%
+  separate(., ci, sep = ", ", into = c("lower", "upper")) %>%
+  mutate(mean = difference) %>%
+  mutate(across(lower:upper, ~ as.numeric(.x)))
+
+data %>%
+  forestplot(labeltext = c(moderator,)) %>%
+  fp_add_header(moderator = "Moderator") %>%
+  fp_set_zebra_style("#EFEFEF")
+```
+
+## Intervention 6-18 Months
+```{r, fig.dpi = 600, fig.width=6.5, fig.height=7}
+data <- read.xlsx("D:\\PATHWEIGH\\delivery_20240917\\scripts\\aim2\\forest_plot_data.xlsx", 4)
+
+data %<>%
+  separate(., ci, sep = ", ", into = c("lower", "upper")) %>%
+  mutate(mean = difference) %>%
+  mutate(across(lower:upper, ~ as.numeric(.x)))
+
+data %>%
+  forestplot(labeltext = c(moderator,)) %>%
+  fp_add_header(moderator = "Moderator") %>%
+  fp_set_zebra_style("#EFEFEF")
+```

@@ -24,11 +24,23 @@ execute:
 library(magrittr, include.only = "%<>%")
 pacman::p_load(tidyverse,
                gtsummary)
+```
 
+```{r}
 data <- read_csv( 
           file = "D:/PATHWEIGH/delivery_20240917/data/aim2_data_20240917.csv",
           show_col_types = FALSE
           )
+
+# Remove variables that caused confusion
+data %<>%
+  select(-slope1, -slope2, -slope3, -slope4)
+
+# Create new variables to aid in interpretation of output
+data %<>%
+  mutate(Phase = Intervention) %>%
+  mutate(Control = ifelse(Intervention == "Control", 1, 0),
+         Intervention = ifelse(Intervention == "Intervention", 1, 0))
 ```
 
 
@@ -41,7 +53,7 @@ mod_data %<>%
 
 mod_data %<>%
   mutate(Race_Ethnicity = relevel(factor(Race_Ethnicity), ref = "Non-Hispanic White")) %>%
-  mutate(Age_cat = relevel(factor(Age_cat), ref = "45-60"))
+  mutate(Age_cat = relevel(factor(Age_cat),ref = "<=45"))
 
 # Convert the N_days_post_* variables to N_months_post_* by dividing days by 30
 # should be equivalent to multiplying the parameter estimates of N_days_post_*
@@ -54,13 +66,52 @@ mod_data %<>%
 
 # create 4 new variables for mediation models
 mod_data %<>%
-  mutate(N_months_post_id1 = slope1 * N_months_post_id,
-         N_months_post_id2 = slope2 * N_months_post_id,
-         N_months_post_180_1 = slope1 * N_months_post_180,
-         N_months_post_180_2 = slope2 * N_months_post_180)
+  mutate(N_months_post_id_con = Control * N_months_post_id,
+         N_months_post_id_int = Intervention * N_months_post_id,
+         N_months_post_180_con = Control * N_months_post_180,
+         N_months_post_180_int = Intervention * N_months_post_180)
 
+# Create a binary variable to indicate whether or not the patient is in Cohort 3
 mod_data %<>%
   mutate(Cohort3 = ifelse(Cohort == "Cohort3", 1, 0))
+```
+
+
+```{r}
+# Create a composite mediator
+## Get the top 25% engagement score
+top_25_eng <- mod_data %>%
+  group_by(DepartmentExternalName, Intervention) %>%
+  slice_head() %>%
+  ungroup() %>%
+  group_by(Intervention) %>%
+  # summarise(median_engagement = median(Engagement))
+  summarise(top_25_eng_cutoff = quantile(Engagement, probs = c(0.75), na.rm = TRUE))
+
+## Get the median number of follow up visits
+top_25_fu <- mod_data %>%
+  group_by(Arb_PersonId, Intervention) %>%
+  slice_head() %>%
+  ungroup() %>%
+  group_by(Intervention) %>%
+  summarise(top_25_fu_cutoff = quantile(n_follow_up, probs = c(0.75), na.rm = TRUE)) 
+
+mod_data %<>%
+  left_join(., top_25_eng, by = "Intervention") %>%
+  left_join(., top_25_fu, by = "Intervention")
+
+
+# Create a binary variable to indicate whether or not the value is in the top 25%
+mod_data %<>%
+  mutate(top_25_eng = ifelse(Engagement >= top_25_eng_cutoff, 1, 0),
+         top_25_fu = ifelse(n_follow_up >= top_25_fu_cutoff, 1, 0))
+
+
+# Create the composite variable
+mod_data %<>%
+  mutate(composite_mediator = ifelse(
+    Any_ref == 1 | Meds_AOM == 1 | Meds_Loss == 1 | 
+    Cohort3 == 1 | top_25_eng == 1 | top_25_fu ==1, 1, 0))
 ```
 
 ```{r}
@@ -72,41 +123,36 @@ mediators <-
     "Meds_Gain",
     "Meds_Loss",
     "Engagement",
-    "Cohort3"
+    "Cohort3", # Should not be a mediator, the intervention has to change it some way
+    "n_follow_up",
+    "composite_mediator"
     )
 ```
 
-# Model Frame Work
-slope1 - Binary indicator where 1 == Intervention
-slope2 - Binary indicator where 1 == Control
-N_months_postid1 - slope1 * N_months_postid. First six months in the intervention phase.
-N_months_post180_1 - slope1 * N_months_post180. Second six months in the intervention phase.
-N_months_postid2 - slope2 * N_months_postid. First six months in the control phase.
-N_months_post180_2 - slope2 * N_months_post180. Second six months in the control phase
-
-## PART1: Mediator model
+## Original Mediator Models
+### PART1: Mediator model
 ```{r, eval = FALSE, echo = TRUE}
 # PART 1: Do the IVs predict the mediator
 med_mod <- glm(
 
-  [MEDIATOR] ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + treat +
+  [MEDIATOR] ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control +
 
-  N_months_post_id1 + N_months_post_180_1 + 
+  N_months_post_id_con + N_months_post_180_con + 
     
-  N_months_post_id2 + N_months_post_180_2,
+  N_months_post_id_int + N_months_post_180_int,
   
   data = mod_data,
 
-  family = "binomial"/"poisson"
+  family = "binomial"/"poisson" # Dependent on the mediator
 )
 ```
 
-## PART2: Outcome model
+### PART2: Outcome model
 ```{r, eval = FALSE, echo = TRUE}
 # PART 2: Model the outcome adjusting for the mediator
 out_mod <-  lm(
 
-  Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + treat +
+  Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control +
 
   [MEDIATOR] + 
 
@@ -118,10 +164,10 @@ out_mod <-  lm(
 )
 ```
 
-## PART3: Mediate function to estimate the ACME and ADE
+### PART3: Mediate function to estimate the ACME and ADE
 ```{r, eval = FALSE, echo = TRUE}
 med_fit <- mediation::mediate(med_mod, out_mod, 
-  treat = "slope1", 
+  treat = "Control", 
   mediator = [MEDIATOR],
   robustSE = TRUE,
   sims = 100)
@@ -131,10 +177,10 @@ summary(med_fit)
 
 ```{r, eval = FALSE, echo = TRUE}
 # OTHER TERMS TO TEST
-med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_id1", mediator = [MEDIATOR])
-med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_180_1", mediator = [MEDIATOR])
-med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_id2", mediator = [MEDIATOR])
-med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_180_2", mediator = [MEDIATOR])
+med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_id_int", mediator = [MEDIATOR])
+med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_180_int", mediator = [MEDIATOR])
+med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_id_con", mediator = [MEDIATOR])
+med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_180_con", mediator = [MEDIATOR])
 ```
 
 ```{r}
@@ -218,7 +264,7 @@ for (i in 1:length(mediators)) {
   
   # PART 1: Do the IVs predict the mediator
   part1_formula <- as.formula(str_c(mediator, 
-  " ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + slope1 + N_months_post_id1 + N_months_post_180_1 + N_months_post_id2 + N_months_post_180_2"))
+  " ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control + N_months_post_id_int + N_months_post_180_int + N_months_post_id_con + N_months_post_180_con"))
 
   # Determine if the mediator is binary 
   distinct_vals <- mod_data %>% 
@@ -243,7 +289,7 @@ for (i in 1:length(mediators)) {
 
   cat("### ", mediator, "Part2: Outcome Model", "\n\n")
   # PART 2: Model the outcome adjusting for the mediator
-  part2_formula <- as.formula(str_c("Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + slope1 + ", mediator, " + N_months_post_id1 + N_months_post_180_1 + N_months_post_id2 + N_months_post_180_2"))
+  part2_formula <- as.formula(str_c("Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control + ", mediator, " + N_months_post_id_int + N_months_post_180_int + N_months_post_id_con + N_months_post_180_con"))
 
   out_mod <-  lm(part2_formula, data = mod_data)
 
@@ -259,7 +305,7 @@ for (i in 1:length(mediators)) {
   # Mediator and Intervention -------------------------------------------------
   cat("### " , "Mediator and Intervention")
   
-  med_fit <- mediation::mediate(med_mod, out_mod, treat = "slope1", mediator = mediator, sims = n_sims)
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "Control", mediator = mediator, sims = n_sims)
   
   output <- extract_mediation_summary(summary(med_fit)) 
   
@@ -273,7 +319,7 @@ for (i in 1:length(mediators)) {
   # Mediator and N_months_post_id in the intervention phase ---------------
   cat("### " , "Mediator and N_months_post_id in the intervention phase")
 
-  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_id1", mediator = mediator, sims = n_sims)
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_id_int", mediator = mediator, sims = n_sims)
 
   output <- extract_mediation_summary(summary(med_fit))
 
@@ -287,7 +333,7 @@ for (i in 1:length(mediators)) {
   # Mediator and N_months_post_id in the intervention phase ---------------
   cat("### " , "Mediator and N_months_post_180 in the intervention phase")
 
-  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_180_1", mediator = mediator, sims = n_sims)
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_180_int", mediator = mediator, sims = n_sims)
   
   output <- extract_mediation_summary(summary(med_fit))
 
@@ -296,13 +342,12 @@ for (i in 1:length(mediators)) {
   print(knitr::kable(mtab))
 
   cat("\n\n")
-
 
 
   # Mediator and N_months_post_id in the control phase --------------------
   cat("### " , "Mediator and N_months_post_id in the control phase")
   
-  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_id2", mediator = mediator, sims = n_sims)
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_id_con", mediator = mediator, sims = n_sims)
   
   output <- extract_mediation_summary(summary(med_fit))
 
@@ -312,10 +357,11 @@ for (i in 1:length(mediators)) {
 
   cat("\n\n")
 
+
   # Mediator and N_months_post_180 in the control phase -----------------------
   cat("### " , "Mediator and N_months_post_180 in the control phase")
   
-  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_180_2", mediator = mediator, sims = n_sims)
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_180_con", mediator = mediator, sims = n_sims)
   
   output <- extract_mediation_summary(summary(med_fit))
 
@@ -327,3 +373,194 @@ for (i in 1:length(mediators)) {
 }
 ```
 
+
+## Mediator models with modified specification
+
+```{r}
+# Create the N_months_post_180_v2 variable
+mod_data %<>%
+  mutate(N_months_post_180_v2 = ifelse(N_months_post_id <= 6, N_months_post_id - 6, 0))
+
+# create 4 new variables for mediation models
+mod_data %<>%
+  mutate(N_months_post_id_con = Control * N_months_post_id,
+         N_months_post_id_int = Intervention * N_months_post_id,
+         N_months_post_180_con = Control * N_months_post_180_v2,
+         N_months_post_180_int = Intervention * N_months_post_180_v2)
+```
+
+
+### PART1: Mediator model
+```{r, eval = FALSE, echo = TRUE}
+# PART 1: Do the IVs predict the mediator
+med_mod <- glm(
+
+  [MEDIATOR] ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control +
+
+  N_months_post_id_con + N_months_post_180_con + 
+    
+  N_months_post_id_con + N_months_post_180_int,
+  
+  data = mod_data,
+
+  family = "binomial"/"poisson" # Dependent on the mediator
+)
+```
+
+### PART2: Outcome model
+```{r, eval = FALSE, echo = TRUE}
+# PART 2: Model the outcome adjusting for the mediator
+out_mod <-  lm(
+
+  Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control +
+
+  [MEDIATOR] + 
+
+  N_months_post_id1 + N_months_post_180_1 + 
+    
+  N_months_post_id2 + N_months_post_180_2,
+  
+  data = mod_data
+)
+```
+
+### PART3: Mediate function to estimate the ACME and ADE
+```{r, eval = FALSE, echo = TRUE}
+med_fit <- mediation::mediate(med_mod, out_mod, 
+  treat = "Control", 
+  mediator = [MEDIATOR],
+  robustSE = TRUE,
+  sims = 100)
+
+summary(med_fit)
+```
+
+## Mediate function with modified model specification
+```{r}
+```
+
+```{r}
+#| echo: false
+#| results: 'asis'
+
+for (i in 1:length(mediators)) {
+  # Set the mediator variable for the model
+  mediator <- mediators[i]
+
+  # Set the number of sims
+  n_sims <- 100
+
+  cat("## ", mediator, "\n\n")
+
+  cat("### ", mediator, "Part1: Mediator Model", "\n\n")
+  
+  # PART 1: Do the IVs predict the mediator
+  part1_formula <- as.formula(str_c(mediator, 
+  " ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control + N_months_post_id_int + N_months_post_180_int + N_months_post_id_con + N_months_post_180_con"))
+
+  # Determine if the mediator is binary 
+  distinct_vals <- mod_data %>% 
+    select(!!sym(mediator)) %>% 
+    n_distinct()
+
+
+  # If the mediator is binary use glm(), otherwise use lm()
+  if (distinct_vals == 2) {
+    med_mod <- glm(part1_formula, data = mod_data, family = binomial)
+  } else if (mediator == "Engagement") {
+    med_mod <- glm(part1_formula, data = mod_data, family = poisson)
+  }
+    
+  tab <- 
+    tbl_regression(med_mod, estimate_fun = ~style_sigfig(., digits = 4)) %>%
+    as_gt() %>% 
+    gt::as_word()
+  
+  # Display table in word -----------------------------------------------------
+  cat("```{=openxml}", tab, "```", sep = "\n")
+
+  cat("### ", mediator, "Part2: Outcome Model", "\n\n")
+  # PART 2: Model the outcome adjusting for the mediator
+  part2_formula <- as.formula(str_c("Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control + ", mediator, " + N_months_post_id_int + N_months_post_180_int + N_months_post_id_con + N_months_post_180_con"))
+
+  out_mod <-  lm(part2_formula, data = mod_data)
+
+  tab2 <- 
+    tbl_regression(out_mod, estimate_fun = ~style_sigfig(., digits = 4)) %>%
+    as_gt() %>% 
+    gt::as_word()
+
+  # Display table in word -----------------------------------------------------
+  cat("```{=openxml}", tab2, "```", sep = "\n")
+
+
+  # Mediator and Intervention -------------------------------------------------
+  cat("### " , "Mediator and Intervention")
+  
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "Control", mediator = mediator, sims = n_sims)
+  
+  output <- extract_mediation_summary(summary(med_fit)) 
+  
+  mtab <- format_mediation(output)
+  
+  print(knitr::kable(mtab))
+  
+  cat("\n\n")
+
+
+  # Mediator and N_months_post_id in the intervention phase ---------------
+  cat("### " , "Mediator and N_months_post_id in the intervention phase")
+
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_id_int", mediator = mediator, sims = n_sims)
+
+  output <- extract_mediation_summary(summary(med_fit))
+
+  mtab <- format_mediation(output)
+  
+  print(knitr::kable(mtab))
+
+  cat("\n\n")
+
+
+  # Mediator and N_months_post_id in the intervention phase ---------------
+  cat("### " , "Mediator and N_months_post_180 in the intervention phase")
+
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_180_int", mediator = mediator, sims = n_sims)
+  
+  output <- extract_mediation_summary(summary(med_fit))
+
+  mtab <- format_mediation(output)
+
+  print(knitr::kable(mtab))
+
+  cat("\n\n")
+
+
+  # Mediator and N_months_post_id in the control phase --------------------
+  cat("### " , "Mediator and N_months_post_id in the control phase")
+  
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_id_con", mediator = mediator, sims = n_sims)
+  
+  output <- extract_mediation_summary(summary(med_fit))
+
+  mtab <- format_mediation(output)
+
+  print(knitr::kable(mtab))
+
+  cat("\n\n")
+
+
+  # Mediator and N_months_post_180 in the control phase -----------------------
+  cat("### " , "Mediator and N_months_post_180 in the control phase")
+  
+  med_fit <- mediation::mediate(med_mod, out_mod, treat = "N_months_post_180_con", mediator = mediator, sims = n_sims)
+  
+  output <- extract_mediation_summary(summary(med_fit))
+
+  mtab <- format_mediation(output)
+
+  print(knitr::kable(mtab))
+
+  cat("\n\n")
+}
+```

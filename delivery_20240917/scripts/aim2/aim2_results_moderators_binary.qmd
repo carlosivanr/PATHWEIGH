@@ -1,0 +1,2187 @@
+---
+title: "Aim 2: Moderators"
+format:
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+    toc: true
+
+# format:
+#   html:
+#     toc: true
+#     embed-resources: true
+
+execute: 
+  echo: false
+---
+
+```{r}
+# *****************************************************************************
+# Carlos Rodriguez, PhD. CU Anschutz Dept. of Family Medicine.
+# aim2_results_moderators
+
+# The purpose of this script is to display the output from a series of
+# moderator models for PATHWEIGH AIM 2.
+# *****************************************************************************
+```
+
+```{r}
+library(magrittr, include.only = "%<>%")
+pacman::p_load(tidyverse,
+               gtsummary)
+
+# For saving gt tbl_regression objects directly to pdf
+options(chromote.headless = "new")
+
+# Set option to display significan digits
+options(pillar.sigfig = 5)
+
+```
+
+```{r}
+# Slope1 originally codes for intervention and slope2 codes for control
+data <- read_csv( 
+          file = "D:/PATHWEIGH/delivery_20240917/data/aim2_data_20240917.csv",
+          show_col_types = FALSE)
+
+# Remove variables that caused confusion in interpretation of output
+data %<>%
+  select(-slope1, -slope2, -slope3, -slope4)
+
+# Create new variables to aid in interpretation of output
+data %<>%
+  mutate(Phase = Intervention) %>%
+  mutate(Control = ifelse(Intervention == "Control", 1, 0),
+         Intervention = ifelse(Intervention == "Intervention", 1, 0))
+
+# Create separate provider gender codes for modeling
+data %<>% 
+  mutate(prov_sex_f = ifelse(Provider_Gender_Code == "M", 1, 0),
+         prov_sex_m = ifelse(Provider_Gender_Code == "F", 1, 0))
+
+
+```
+
+```{r}
+# Rescale patient level predictors %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+pt_rscl <- data %>% 
+  filter(IndexVisit == 1) %>%
+  select(Arb_PersonId, Intervention, BMI_bl, PHQ9, GAD7) %>%
+  group_by(Intervention) %>%
+  mutate(across(BMI_bl:GAD7, ~ scale(.x)[, 1])) %>%
+  ungroup()
+
+# Rename the columns
+colnames(pt_rscl) <- c("Arb_PersonId", "Intervention", "BMI_bl_rscl", "PHQ9_rscl", "GAD7_rscl")
+```
+
+
+```{r, eval = FALSE}
+# How many people are missing PHQ9 in each intervention
+pt_rscl %>% 
+  filter(is.na(PHQ9_rscl)) %>%
+  group_by(Intervention) %>%
+  count() %>%
+  ungroup()
+
+# How many people are missing GAD7 in each intervention
+pt_rscl %>% 
+  filter(is.na(GAD7_rscl)) %>%
+  group_by(Intervention) %>%
+  count() %>%
+  ungroup()
+```
+
+
+```{r}
+# pt_rscl = patient level predictors rescaled
+pt_rscl %<>% 
+  select(Arb_PersonId, Intervention, BMI_bl_rscl)
+
+# Merge back into data
+data %<>%
+  left_join(., pt_rscl, by  = c("Arb_PersonId", "Intervention"))
+```
+
+
+```{r}
+# Rescale provider level characteristics %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+prov_yrs_prac <- data %>%
+  group_by(ProviderNpi) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(ProviderNpi, Years_in_prac) %>%
+  mutate(Years_in_prac_rscl = scale(Years_in_prac)[, 1]) %>%
+  select(-Years_in_prac)
+
+data %<>%
+  left_join(., prov_yrs_prac, by = "ProviderNpi")
+```
+
+
+```{r}
+# Recale clinic level predictors %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+medicaid_rscl <- data %>%
+  group_by(DepartmentExternalName, Intervention) %>%
+  slice_head() %>%
+  select(DepartmentExternalName, Intervention, percent_medicaid) %>%
+  arrange(DepartmentExternalName) %>%
+  ungroup() %>%
+  group_by(Intervention) %>%
+  mutate(Percent_medicaid_per_phase_rscl = scale(percent_medicaid)[, 1]) %>%
+  ungroup() %>%
+  select(-percent_medicaid)
+
+vol_per_year_rscl <- data %>%
+  group_by(DepartmentExternalName, Year) %>%
+  slice_head() %>%
+  select(DepartmentExternalName, Year, Pt_vol_per_year) %>%
+  ungroup() %>%
+  group_by(Year) %>%
+  mutate(Pt_vol_per_yr_rscl = scale(Pt_vol_per_year)[, 1]) %>%
+  ungroup() %>%
+  select(-Pt_vol_per_year)
+
+data %<>%
+  left_join(., medicaid_rscl, by = c("DepartmentExternalName", "Intervention")) %>%
+  left_join(., vol_per_year_rscl, by = c("DepartmentExternalName", "Year"))
+```
+
+
+```{r}
+# Create the modeling data frame %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+mod_data <- data %>% filter(IndexVisit != 1)
+
+mod_data %<>%
+  mutate(Arb_PersonId = factor(Arb_PersonId))
+
+mod_data %<>%
+  mutate(Race_Ethnicity = relevel(factor(Race_Ethnicity), ref = "Non-Hispanic White")) %>%
+  mutate(Age_cat = relevel(factor(Age_cat), ref = "<=45")) %>%
+  mutate(Years_in_prac_cat = relevel(recode_factor(Years_in_prac_cat, 
+                                      "(0,4]" = "0-4",
+                                      "(4,8]" = "4-8",
+                                      "(8,12]" = "8-12",
+                                      "(12,16]" = "12-16",
+                                      "(16,20]" = "16-20",
+                                      .default = "Unknown"), ref = "8-12"))
+
+mod_data %<>%                                    
+  mutate(Provider_Gender_Code = factor(
+      ifelse(Provider_Gender_Code == "X", "Unknown", Provider_Gender_Code))) %>%
+  mutate(Provider_Gender_Code = relevel(Provider_Gender_Code, ref = "F"))
+
+# Convert the N_days_post_* variables to N_months_post_* by dividing days by 30
+# should be equivalent to multiplying the parameter estimates of N_days_post_*
+# by 30 in the output table, but much easier to work with. Otherwise it is a 
+# challenge to modify tidy() or tbl_regression() output for display in a word
+# or .html document.
+mod_data %<>%
+  mutate(N_months_post_id = N_days_post_id / 30,
+         N_months_post_180 = N_days_post_180 / 30)
+
+# Recode the EOSS variable to factor to accomodate the Unknowns
+mod_data %<>%
+  mutate(EOSS = relevel(factor(EOSS), ref = "1"))
+```
+
+```{r}
+moderators <- 
+c(
+"Age_cat",
+"Sex",
+"Race_Ethnicity",
+"Insurance",
+"BMI_bl_rscl", #rescaled to address predictor on difference scales warning
+"EOSS", # Has missing values
+"Former_Smoker", #
+# "PHQ9_rscl", #rescaled to address predictor on difference scales warning
+# "GAD7_rscl", #rescaled to address predictor on difference scales warning
+# "Provider_Gender_Code",
+"prov_sex_f",
+"prov_sex_m",
+"Years_in_prac_cat", # Has missing values
+"FMphys", #
+"IMphys", #
+"OTHphys", #
+"FMAPP", #
+"IMAPP", #
+"OTHAPP", #
+"Pt_vol_per_yr_rscl",  #rescaled to address predictor on difference scales warning
+"Percent_medicaid_per_phase_rscl", #0 (non-NA) cases  #rescaled to address predictor on difference scales warning
+"avg_fte" # over 20% of providers have cFTE less than .10, which questions the validity of the varaible.
+)
+```
+
+# Tables
+
+## Patient level
+```{r}
+# patient level
+data %>%
+  filter(Intervention == 0,
+         IndexVisit == 1) %>%
+  select(Age, Sex, Race_Ethnicity, BMI, Smoking_Status, Insurance, EOSS) %>%
+  mutate(across(c(Smoking_Status, EOSS), ~ factor(.x))) %>%
+  mutate(across(c(Smoking_Status, EOSS), ~ fct_na_value_to_level(.x, level = "Unknown"))) %>%
+  tbl_summary(
+    statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+                  label = list(Age ~ "Age (years)",
+                               Race_Ethnicity ~ "Race/Ethnicity",
+                               BMI ~ "BMI (kg/m\U00B2)", # U00B2 will display meters squared
+                               Smoking_Status ~ "Smoking Status"),
+                  digits = list(all_categorical() ~ c(0,1),
+                                  all_continuous() ~ c(1,1))
+  )
+```
+
+## Provider level
+```{r}
+# provider level
+data %>%
+  group_by(ProviderNpi) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(
+    Provider_Gender_Code,
+    Years_in_prac_cat,
+    FMphys,
+    IMphys,
+    FMAPP,
+    IMAPP,
+    avg_fte) %>%
+  mutate(Provider_Gender_Code = ifelse(Provider_Gender_Code == "X", NA, Provider_Gender_Code)) %>%
+  mutate(Years_in_prac_cat = recode(Years_in_prac_cat, "(0,4]" = "0-4",
+                                                       "(4,8]" = "4-8",
+                                                       "(8,12]" = "8-12",
+                                                       "(12,16]" = "12-16",
+                                                       "(16,20]" = "16-20")) %>%
+  mutate(Years_in_prac_cat = factor(Years_in_prac_cat, levels = c("0-4","4-8","8-12","12-16","16-20"))) %>%
+  mutate(across(c(Provider_Gender_Code, Years_in_prac_cat), ~ fct_na_value_to_level(.x, level = "Unknown"))) %>%
+tbl_summary(
+  missing = "no",
+  statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+  label = list(Provider_Gender_Code ~ "Provider Gender",
+                Years_in_prac_cat ~ "Years in Practice",
+                FMphys ~ "Family Medicine Physician", 
+                IMphys ~ "Internal Medicine Physician",
+                FMAPP ~ "Family Medicine Advanced Practice Provider",
+                IMAPP ~ "Internal Medicine Advanced Practice Provider",
+                avg_fte ~ "Average FTE"),
+  digits = list(all_categorical() ~ c(0,1),
+                  all_continuous() ~ c(1,1))
+)
+```
+
+## Clinic level
+```{r}
+# clinic level
+
+# Since each department has 3 years worth of pt_vol, average out over the years
+left_join(
+  (data %>%
+  group_by(DepartmentExternalName, Year) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(DepartmentExternalName, Year, Pt_vol_per_year) %>%
+  group_by(DepartmentExternalName) %>%
+  summarise(average_pt_vol_per_year = mean(Pt_vol_per_year))),
+
+# Since percent medicaid is averaged over phase
+  (data %>%
+  group_by(DepartmentExternalName, Intervention) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(DepartmentExternalName, Intervention, percent_medicaid) %>%
+  group_by(DepartmentExternalName) %>%
+  summarise(average_percent_medicaid_per_phase = mean(percent_medicaid))),
+  by = "DepartmentExternalName") %>%
+  select(-DepartmentExternalName) %>%
+tbl_summary(
+  missing = "no",
+  statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+  label = list(average_pt_vol_per_year ~ "Patient volume per year",
+               average_percent_medicaid_per_phase ~ "Percent medicaid per phase"),
+  digits = list(all_categorical() ~ c(0,1),
+                  all_continuous() ~ c(1,1))
+)
+```
+
+
+```{r}
+#| results: 'asis'
+#| echo: false
+
+all_models  <- list()
+
+for (m in 1:length(moderators)) {
+  cat("## ", moderators[m], "\n")
+
+  # Leigh wanted to exclude all provider with fte less than .20
+  # Will need to remove any patients with just one follow up visits in one
+  # phase. But then wanted to see what the results were with all of the FTE
+  # values
+  # ***************************************************************************
+  # if (moderators[m] == "avg_fte") {
+  #   # modeling_data_set <- mod_data %>% filter(avg_fte > .20)
+  #   # Keep those with visits in both control and intervention
+  #   # reduces number of patients to 8,856 from 9,358
+  #   patient_ids <-
+  #   modeling_data_set %>%
+  #     group_by(Arb_PersonId) %>%
+  #     summarise(n_distinct_int = n_distinct(Intervention)) %>%
+  #     filter(n_distinct_int == 2)
+
+  #   modeling_data_set %<>%
+  #     filter(Arb_PersonId %in% patient_ids$Arb_PersonId)
+
+  # } else {
+  #   modeling_data_set <- mod_data
+  # }
+  # ***************************************************************************
+
+  # Set a universal modeling_data_set data frame for all moderators
+  modeling_data_set <- mod_data
+
+
+  # print(moderators[m])
+  formula <- as.formula(str_c("Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control + ",
+
+          moderators[m], " + Control:", moderators[m], 
+
+          #piecewise terms          
+          " + Intervention:N_months_post_id + Intervention:N_months_post_180 + Control:N_months_post_id + Control:N_months_post_180 + ",
+
+          #moderator terms slope1:moderators[m] + slope2:moderator + moderators[m]
+          "Control:N_months_post_id:", moderators[m], 
+          " + Intervention:N_months_post_id:", moderators[m], 
+          " + Control:N_months_post_180:", moderators[m], 
+          " + Intervention:N_months_post_180:", moderators[m], 
+          " + ",    
+          
+          #clustering term
+          "(1| Arb_PersonId)"))
+
+  model <- lmerTest::lmer(formula, data = modeling_data_set)
+
+  # Save output
+  all_models <- c(all_models, list(model))
+
+  tab <- model %>% 
+    tbl_regression(., estimate_fun = ~style_sigfig(., digits = 4)) %>%
+    as_gt() %>% 
+    gt::as_word()
+
+  # Print a word gt table object in a for-loop
+  cat("```{=openxml}", tab, "```", sep = "\n")
+  
+  cat("\n\n")
+}
+```
+
+# Models with N_months_post_180_v2
+- N_months_post_180_v2 is created as follows: If N_months_post_id is less than or equal to 6 then set N_months_post_180_v2 to N_months_post_id minus 6, otherwise set to 0. Normally, N_months_post_180 is set to 0 for N_months_post_id less than or equal to 6, otherwise it is set to N_months_post_id minus 6 at values greater than 6
+```{r}
+mod_data %<>%
+  mutate(N_months_post_180_v2 = ifelse(N_months_post_id <= 6, N_months_post_id - 6, 0)
+         )
+```
+
+```{r}
+#| results: 'asis'
+#| echo: false
+
+all_models2  <- list()
+
+for (m in 1:length(moderators)) {
+  cat("## ", moderators[m], "\n")
+
+  # Set a universal modeling_data_set data frame for all moderators
+  modeling_data_set <- mod_data
+
+
+  # print(moderators[m])
+  formula <- as.formula(str_c("Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control + ",
+
+          moderators[m], " + Control:", moderators[m], 
+
+          #piecewise terms          
+          " + Intervention:N_months_post_id + Intervention:N_months_post_180_v2 + Control:N_months_post_id + Control:N_months_post_180_v2 + ",
+
+          #moderator terms slope1:moderators[m] + slope2:moderator + moderators[m]
+          "Control:N_months_post_id:", moderators[m], 
+          " + Intervention:N_months_post_id:", moderators[m], 
+          " + Control:N_months_post_180_v2:", moderators[m], 
+          " + Intervention:N_months_post_180_v2:", moderators[m], 
+          " + ",    
+          
+          #clustering term
+          "(1| Arb_PersonId)"))
+
+  model <- lmerTest::lmer(formula, data = modeling_data_set)
+
+  # Save output
+  all_models2 <- c(all_models2, list(model))
+
+  tab <- model %>% 
+    tbl_regression(., estimate_fun = ~style_sigfig(., digits = 4)) %>%
+    as_gt() %>% 
+    gt::as_word()
+
+  # Print a word gt table object in a for-loop
+  cat("```{=openxml}", tab, "```", sep = "\n")
+  
+  cat("\n\n")
+}
+```
+
+```{r, eval = FALSE, echo = FALSE}
+# Testing model to see what happens when Age_cat is entered twice.
+# Results, only one term is used has benign effects, for-loop should work just fine
+lmerTest::lmer(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control + Age_cat +
+
+          #piecewise terms          
+          Intervention:N_days_post_id + Intervention:N_days_post_180 + Control:N_days_post_id + Control:N_days_post_180 + 
+
+          #moderator terms control:moderators[m] + intervention:moderator + moderators[m]
+          Intervention:N_days_post_id:Age_cat + Control:N_days_post_id:Age_cat + Intervention:N_days_post_180:Age_cat + Control:N_days_post_180:Age_cat +    
+          
+          #clustering term
+          (1| Arb_PersonId),
+          
+          data = mod_data)
+```
+
+
+# Figures
+```{r}
+facet_labels <- as_labeller(
+  c(`0` = "Usual Care",
+    `1` = "Intervention")
+)
+```
+
+```{r}
+# Run the models again with dummy variables to be able to make predictions and generate figures
+mod_data %<>%
+  mutate(age_lt_45 = ifelse(Age_cat == "<=45", 1, 0),
+         age_45_to_60 = ifelse(Age_cat == "45-60", 1, 0),
+         age_gt_60 = ifelse(Age_cat == ">60", 1, 0),
+         sex_m = ifelse(Sex == "Male", 1, 0),
+         sex_f = ifelse(Sex == "Female", 1, 0),
+         reth_nhw = ifelse(Race_Ethnicity == "Non-Hispanic White", 1, 0),
+         reth_his = ifelse(Race_Ethnicity == "Hispanic or Latino", 1, 0),
+         reth_blk = ifelse(Race_Ethnicity == "Black or African American", 1, 0),
+         reth_asn = ifelse(Race_Ethnicity == "Asian", 1, 0),
+         reth_oth = ifelse(Race_Ethnicity == "Other", 1, 0),
+         reth_ukn = ifelse(Race_Ethnicity == "Unknown", 1, 0),
+         year_at_ind0 = ifelse(Year_at_ind == "Year0", 1, 0),
+         year_at_ind1 = ifelse(Year_at_ind == "Year1", 1, 0),
+         year_at_ind2 = ifelse(Year_at_ind == "Year2", 1, 0),
+         year_at_ind3 = ifelse(Year_at_ind == "Year3", 1, 0),
+         year_at_ind4 = ifelse(Year_at_ind == "Year4", 1, 0)
+         )
+```
+
+<!-- *************************** GENDER *********************************** -->
+```{r}
+# Fit a model where Gender is the moderator -----------------------------------
+lmer_mod_bin <- lmerTest::lmer(Weight_dv ~
+    
+    # age - age_lt_45 is the reference
+    age_45_to_60 + age_gt_60 +
+
+    # sex, sex_f is the reference
+    sex_m +
+
+    # race ethnicity - reth_nhw is the reference non-hispanic white
+    reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+    # year at index - year_at_ind0 is the reference
+    year_at_ind1 + year_at_ind2 + year_at_ind3 + year_at_ind4 +
+
+    # Weight at baseline
+    Weight_bl + Intervention + Control:sex_m +
+
+    # Slope1 is the same as Phase/Intervention group
+    Intervention:N_months_post_id + Intervention:N_months_post_180 +
+
+    # Slope2 is the opposite
+    Control:N_months_post_id + Control:N_months_post_180 +
+
+    # Moderator terms
+    Intervention:N_months_post_id:sex_m + Intervention:N_months_post_180:sex_m +
+        
+    Control:N_months_post_id:sex_m + Control:N_months_post_180:sex_m +
+
+    # Clustering
+    (1| Arb_PersonId),
+
+    # Input data frame
+    data = mod_data
+    )
+```
+
+## Males
+```{r}
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since 
+# covariates are time invarying within phase, it's not necessary to capture the 
+# index visit
+overlay_data <- 
+mod_data %>%
+  filter(sex_m == 1) %>%
+  # group_by(Arb_PersonId, Intervention) %>%
+  # slice_head() %>%
+  # ungroup() %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3, year_at_ind4,
+       Weight_bl, Intervention, Control,
+       N_months_post_id, N_months_post_180) %>%
+  group_by(Intervention) %>%
+  summarise_all(mean, .groups = "drop") %>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18), 2)) %>%
+  mutate(N_months_post_180 = rep(c(0, 0, 12), 2))
+```
+
+```{r}
+# Get the predicted values
+overlay_data %<>%
+    mutate(predicted = predict(lmer_mod_bin, overlay_data, re.form = NA))
+```
+
+```{r}
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_months_post_id, predicted, Intervention) %>%
+  rename(Avg_weight_kgs = predicted)
+```
+
+```{r}
+# Males ----------------------------------------------------------------------
+observed_vals <- 
+    mod_data %>%
+    filter(sex_m == 1) %>%
+    mutate(observed = Weight_dv) %>%
+    select(Arb_PersonId, Arb_EncounterId, observed, Intervention, Sex)
+```
+
+```{r}
+# Need to get the original N_months_post_id variable back into the data set
+# to use for plotting along the X axis
+N_months_post_id <- data %>%
+  filter(Arb_EncounterId %in% mod_data$Arb_EncounterId) %>%
+  select(Arb_EncounterId, N_months_post_id)
+```
+
+```{r}
+# *** MODIFY THE SEX VARIABLE FOR OTHER FIGURES
+observed_vals %<>%
+  left_join(., N_months_post_id, by = "Arb_EncounterId") %>%
+  select(-Arb_EncounterId) %>%
+  group_by(Arb_PersonId, Intervention, N_months_post_id, Sex) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  select(-Arb_PersonId) %>%
+  group_by(N_months_post_id, Intervention, Sex) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  mutate(Avg_weight_kgs = observed) %>%
+  filter(N_months_post_id <= 18)
+```
+
+```{r}
+# Create the slopes data frame to plote the slopes in control and in 
+# intervention as geom_text() elements
+
+# Create a data frame called slopes
+# with Intervention, N_months_post_id, Avg_weight_kgs, and lab
+# N_months_post id is numeric to place the x value
+# Intervention is 0 or 1
+# Avg_weight_kgs is a variable to place the y value
+# lab will contain text
+# Two slopes per intervention one for 1st 6 months, one for subsequent 12 months
+slopes <- overlay_data %>%
+  mutate(slope = Avg_weight_kgs - lag(Avg_weight_kgs)) %>%
+  filter(N_months_post_id != 0) %>%
+  mutate(slope = ifelse(N_months_post_id == 6, slope / 6, slope)) %>%
+  mutate(slope = ifelse(N_months_post_id == 18, slope / 12, slope)) %>%
+  mutate(slope = round(slope, 2)) %>%
+  # mutate(Intervention = ifelse(Intervention == 0, "Con", "Int")) %>%
+  select(-Avg_weight_kgs) %>%
+  group_by(Intervention) %>%
+  pivot_wider(names_from = "N_months_post_id", values_from = "slope") %>%
+  ungroup() %>%
+  mutate(lab = str_c("Rate of change\n0-6mo: ", `6`, " kg/month\n6-18mo: ", `18`, " kg/month"))
+```
+
+```{r, fig.dpi = 600, fig.width=6.5}
+# MODIFY SLOPES DATA FRAME TO SET THE X AND Y COORDINATES ---------------------
+slopes %<>%
+  mutate(Avg_weight_kgs = 117,
+         N_months_post_id = 1.5)
+
+# BASE PLOT OF OBSERVED WEIGHTS IN EACH MONTH AFTER INDEX ---------------------
+observed_vals %>%
+  filter(Sex == "Male") %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_weight_kgs)) +
+  geom_line() +
+  geom_line(data = overlay_data, linetype = 3, color = "blue") +
+  facet_wrap(~ Intervention, labeller = facet_labels) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  # ylim(ylims) +
+  ylab("Average weight (kgs)") +
+  xlab("Months after index visit") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2) +
+  theme(strip.text = element_text(face="bold"))
+```
+
+## Females
+```{r}
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since 
+# covariates are time invarying within phase, it's not necessary to capture the 
+# index visit
+overlay_data <- 
+mod_data %>%
+  filter(sex_m == 0) %>%
+  # group_by(Arb_PersonId, Intervention) %>%
+  # slice_head() %>%
+  # ungroup() %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3, year_at_ind4,
+       Weight_bl, Intervention, Control,
+       N_months_post_id, N_months_post_180) %>%
+  group_by(Intervention) %>%
+  summarise_all(mean, .groups = "drop") %>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18), 2)) %>%
+  mutate(N_months_post_180 = rep(c(0, 0, 12), 2))
+```
+
+```{r}
+# Get the predicted values
+overlay_data %<>%
+    mutate(predicted = predict(lmer_mod_bin, overlay_data, re.form = NA))
+```
+
+```{r}
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_months_post_id, predicted, Intervention) %>%
+  rename(Avg_weight_kgs = predicted)
+```
+
+```{r}
+# Females ---------------------------------------------------------------------
+observed_vals <- 
+    mod_data %>%
+    filter(sex_m == 0) %>%
+    mutate(observed = Weight_dv) %>%
+    select(Arb_PersonId, Arb_EncounterId, observed, Intervention, Sex)
+```
+
+```{r}
+# Need to get the original N_months_post_id variable back into the data set
+# to use for plotting along the X axis
+N_months_post_id <- data %>%
+  filter(Arb_EncounterId %in% mod_data$Arb_EncounterId) %>%
+  select(Arb_EncounterId, N_months_post_id)
+```
+
+```{r}
+# *** MODIFY THE SEX VARIABLE FOR OTHER FIGURES
+observed_vals %<>%
+  left_join(., N_months_post_id, by = "Arb_EncounterId") %>%
+  select(-Arb_EncounterId) %>%
+  group_by(Arb_PersonId, Intervention, N_months_post_id, Sex) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  select(-Arb_PersonId) %>%
+  group_by(N_months_post_id, Intervention, Sex) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  mutate(Avg_weight_kgs = observed) %>%
+  filter(N_months_post_id <= 18)
+```
+
+```{r}
+# Create the slopes data frame to plote the slopes in control and in 
+# intervention as geom_text() elements
+
+slopes <- overlay_data %>%
+  mutate(slope = Avg_weight_kgs - lag(Avg_weight_kgs)) %>%
+  filter(N_months_post_id != 0) %>%
+  mutate(slope = ifelse(N_months_post_id == 6, slope / 6, slope)) %>%
+  mutate(slope = ifelse(N_months_post_id == 18, slope / 12, slope)) %>%
+  mutate(slope = round(slope, 2)) %>%
+  # mutate(Intervention = ifelse(Intervention == 0, "Con", "Int")) %>%
+  select(-Avg_weight_kgs) %>%
+  group_by(Intervention) %>%
+  pivot_wider(names_from = "N_months_post_id", values_from = "slope") %>%
+  ungroup() %>%
+  mutate(lab = str_c("Rate of change\n0-6mo: ", `6`, " kg/month\n6-18mo: ", `18`, " kg/month"))
+```
+
+```{r, fig.dpi = 600, fig.width=6.5}
+# MODIFY SLOPES DATA FRAME TO SET THE X AND Y COORDINATES ---------------------
+slopes %<>%
+  mutate(Avg_weight_kgs = 106.5,
+         N_months_post_id = 1.5)
+
+# BASE PLOT OF OBSERVED WEIGHTS IN EACH MONTH AFTER INDEX ---------------------
+observed_vals %>%
+  filter(Sex == "Female") %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_weight_kgs)) +
+  geom_line() +
+  geom_line(data = overlay_data, linetype = 3, color = "blue") +
+  facet_wrap(~ Intervention, labeller = facet_labels) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  # ylim(ylims) +
+  ylab("Average weight (kgs)") +
+  xlab("Months after index visit") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2) + 
+  theme(strip.text = element_text(face="bold"))
+```
+
+
+```{r}
+# Initial version of N_months_post_180_v2
+# This led to rank deficient model, dropped 3 columns, eventhough I showed Qing the output and she said it was OK 
+# mod_data %<>%
+#   mutate(N_months_post_180_v2 = ifelse(N_months_post_id <= 6, N_months_post_id - 6, N_months_post_180 )
+#          )
+
+# 2nd version of the new
+# mod_data %<>%
+#   mutate(N_months_post_180_v2 = ifelse(N_months_post_id <= 6, N_months_post_id - 6, 0)
+#          )
+```
+
+```{r, eval = FALSE}
+lmer_mod_bin <- lmerTest::lmer(Weight_dv ~
+    
+    # age - age_lt_45 is the reference
+    age_45_to_60 + age_gt_60 +
+
+    # sex, sex_f is the reference
+    sex_m +
+
+    # race ethnicity - reth_nhw is the reference non-hispanic white
+    reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+    # year at index - year_at_ind0 is the reference
+    year_at_ind1 + year_at_ind2 + year_at_ind3 + year_at_ind4 +
+
+    # Weight at baseline
+    Weight_bl + Intervention + Control:sex_m +
+
+    # Set1
+    Intervention:N_months_post_id + Intervention:N_months_post_180_v2 +
+
+    # Set 2
+    Control:N_months_post_id + Control:N_months_post_180_v2 +
+
+    # Moderator terms
+    Intervention:N_months_post_id:sex_m + Intervention:N_months_post_180_v2:sex_m +
+        
+    Control:N_months_post_id:sex_m + Control:N_months_post_180_v2:sex_m +
+
+    # Clustering
+    (1| Arb_PersonId),
+
+    # Input data frame
+    data = mod_data
+    )
+```
+
+```{r}
+# If we change all time variables in this way, the slope in the first 6m would
+# be the sum of the two coefficients (beta1+beta2), the slope in months 6 to 18
+# would be beta1. You can have interactions with intervention and control to 
+# get phase-specific slopes. Furthermore, you can add 
+# male*intervention*n_month_post_id to get the change from female to male in 
+# the intervention phase.
+
+# Used to save model output to word file while troubleshooting how to get the 
+# p-values for the other comparisons
+# tbl_regression(lmer_mod_bin) %>%
+#   as_gt() %>%
+#   gt::gtsave(, filename = "new_model.docx", path = "D:\\PATHWEIGH\\delivery_20240917\\scripts\\aim2")
+```
+
+## FM Physicians
+```{r}
+# Fit a model where FMphys is the moderator -------------------------
+lmer_mod_bin <- lmerTest::lmer(Weight_dv ~
+    
+    # age - age_lt_45 is the reference
+    age_45_to_60 + age_gt_60 +
+
+    # sex, sex_f is the reference
+    sex_m + FMphys +
+
+    # race ethnicity - reth_nhw is the reference non-hispanic white
+    reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+    # year at index - year_at_ind0 is the reference
+    year_at_ind1 + year_at_ind2 + year_at_ind3 + year_at_ind4 +
+
+    # Weight at baseline
+    Weight_bl + Intervention + Control:FMphys +
+
+    # Slope1 is the same as Phase/Intervention group
+    Intervention:N_months_post_id + Intervention:N_months_post_180 +
+
+    # Slope2 is the opposite
+    Control:N_months_post_id + Control:N_months_post_180 +
+
+    # Moderator terms
+    Intervention:N_months_post_id:FMphys + Intervention:N_months_post_180:FMphys +
+        
+    Control:N_months_post_id:FMphys + Control:N_months_post_180:FMphys +
+
+    # Clustering
+    (1| Arb_PersonId),
+
+    # Input data frame
+    data = mod_data
+    )
+```
+
+```{r}
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since 
+# covariates are time invarying within phase, it's not necessary to capture the 
+# index visit
+overlay_data <- 
+mod_data %>%
+  filter(FMphys == 1) %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m, FMphys, # Ensure the variable is selected
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3, year_at_ind4,
+       Weight_bl, Intervention, Control,
+       N_months_post_id, N_months_post_180) %>%
+  group_by(Intervention) %>%
+  summarise_all(mean, na.rm = TRUE, .groups = "drop") %>% # Remove NAs in FMphys, othwerwise predictions will not work
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18), 2)) %>%
+  mutate(N_months_post_180 = rep(c(0, 0, 12), 2))
+```
+
+```{r}
+# Get the predicted values
+overlay_data %<>%
+    mutate(predicted = predict(lmer_mod_bin, overlay_data, re.form = NA))
+```
+
+```{r}
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_months_post_id, predicted, Intervention) %>%
+  rename(Avg_weight_kgs = predicted)
+```
+
+```{r}
+# FMphys ----------------------------------------------------------------------
+observed_vals <- 
+    mod_data %>%
+    filter(FMphys == 1) %>%
+    mutate(observed = Weight_dv) %>%
+    select(Arb_PersonId, Arb_EncounterId, observed, Intervention, FMphys)
+```
+
+```{r}
+# Need to get the original N_months_post_id variable back into the data set
+# to use for plotting along the X axis
+N_months_post_id <- data %>%
+  filter(Arb_EncounterId %in% mod_data$Arb_EncounterId) %>%
+  select(Arb_EncounterId, N_months_post_id)
+```
+
+```{r}
+# *** MODIFY THE SEX VARIABLE FOR OTHER FIGURES
+observed_vals %<>%
+  left_join(., N_months_post_id, by = "Arb_EncounterId") %>%
+  select(-Arb_EncounterId) %>%
+  group_by(Arb_PersonId, Intervention, N_months_post_id, FMphys) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  select(-Arb_PersonId) %>%
+  group_by(N_months_post_id, Intervention, FMphys) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  mutate(Avg_weight_kgs = observed) %>%
+  filter(N_months_post_id <= 18)
+```
+
+```{r}
+# Create the slopes data frame to plote the slopes in control and in 
+# intervention as geom_text() elements
+
+# Create a data frame called slopes
+# with Intervention, N_months_post_id, Avg_weight_kgs, and lab
+# N_months_post id is numeric to place the x value
+# Intervention is 0 or 1
+# Avg_weight_kgs is a variable to place the y value
+# lab will contain text
+# Two slopes per intervention one for 1st 6 months, one for subsequent 12 months
+slopes <- overlay_data %>%
+  mutate(slope = Avg_weight_kgs - lag(Avg_weight_kgs)) %>%
+  filter(N_months_post_id != 0) %>%
+  mutate(slope = ifelse(N_months_post_id == 6, slope / 6, slope)) %>%
+  mutate(slope = ifelse(N_months_post_id == 18, slope / 12, slope)) %>%
+  mutate(slope = round(slope, 2)) %>%
+  # mutate(Intervention = ifelse(Intervention == 0, "Con", "Int")) %>%
+  select(-Avg_weight_kgs) %>%
+  group_by(Intervention) %>%
+  pivot_wider(names_from = "N_months_post_id", values_from = "slope") %>%
+  ungroup() %>%
+  mutate(lab = str_c("Rate of change\n0-6mo: ", `6`, " kg/month\n6-18mo: ", `18`, " kg/month"))
+```
+
+```{r, fig.dpi = 600, fig.width=6.5}
+# MODIFY SLOPES DATA FRAME TO SET THE X AND Y COORDINATES ---------------------
+slopes %<>%
+  mutate(Avg_weight_kgs = 112.5,
+         N_months_post_id = 1.5)
+
+# BASE PLOT OF OBSERVED WEIGHTS IN EACH MONTH AFTER INDEX ---------------------
+observed_vals %>%
+  filter(FMphys == 1) %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_weight_kgs)) +
+  geom_line() +
+  geom_line(data = overlay_data, linetype = 3, color = "blue") +
+  facet_wrap(~ Intervention, labeller = facet_labels) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  # ylim(ylims) +
+  ylab("Average weight (kgs)") +
+  xlab("Months after index visit") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2) +
+  theme(strip.text = element_text(face="bold"))
+```
+
+## Non FM Physicians
+```{r}
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since 
+# covariates are time invarying within phase, it's not necessary to capture the 
+# index visit
+overlay_data <- 
+mod_data %>%
+  filter(FMphys == 0) %>%
+  # group_by(Arb_PersonId, Intervention) %>%
+  # slice_head() %>%
+  # ungroup() %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m, FMphys,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3, year_at_ind4,
+       Weight_bl, Intervention, Control,
+       N_months_post_id, N_months_post_180) %>%
+  group_by(Intervention) %>%
+  summarise_all(mean, .groups = "drop") %>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18), 2)) %>%
+  mutate(N_months_post_180 = rep(c(0, 0, 12), 2))
+```
+
+```{r}
+# Get the predicted values
+overlay_data %<>%
+    mutate(predicted = predict(lmer_mod_bin, overlay_data, re.form = NA))
+```
+
+```{r}
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_months_post_id, predicted, Intervention) %>%
+  rename(Avg_weight_kgs = predicted)
+```
+
+```{r}
+# Non FMphys ------------------------------------------------------------------
+observed_vals <- 
+    mod_data %>%
+    filter(FMphys == 0) %>%
+    mutate(observed = Weight_dv) %>%
+    select(Arb_PersonId, Arb_EncounterId, observed, Intervention, FMphys)
+```
+
+```{r}
+# Need to get the original N_months_post_id variable back into the data set
+# to use for plotting along the X axis
+N_months_post_id <- data %>%
+  filter(Arb_EncounterId %in% mod_data$Arb_EncounterId) %>%
+  select(Arb_EncounterId, N_months_post_id)
+```
+
+```{r}
+# *** MODIFY THE SEX VARIABLE FOR OTHER FIGURES
+observed_vals %<>%
+  left_join(., N_months_post_id, by = "Arb_EncounterId") %>%
+  select(-Arb_EncounterId) %>%
+  group_by(Arb_PersonId, Intervention, N_months_post_id, FMphys) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  select(-Arb_PersonId) %>%
+  group_by(N_months_post_id, Intervention, FMphys) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  mutate(Avg_weight_kgs = observed) %>%
+  filter(N_months_post_id <= 18)
+```
+
+```{r}
+# Create the slopes data frame to plote the slopes in control and in 
+# intervention as geom_text() elements
+
+slopes <- overlay_data %>%
+  mutate(slope = Avg_weight_kgs - lag(Avg_weight_kgs)) %>%
+  filter(N_months_post_id != 0) %>%
+  mutate(slope = ifelse(N_months_post_id == 6, slope / 6, slope)) %>%
+  mutate(slope = ifelse(N_months_post_id == 18, slope / 12, slope)) %>%
+  mutate(slope = round(slope, 2)) %>%
+  # mutate(Intervention = ifelse(Intervention == 0, "Con", "Int")) %>%
+  select(-Avg_weight_kgs) %>%
+  group_by(Intervention) %>%
+  pivot_wider(names_from = "N_months_post_id", values_from = "slope") %>%
+  ungroup() %>%
+  mutate(lab = str_c("Rate of change\n0-6mo: ", `6`, " kg/month\n6-18mo: ", `18`, " kg/month"))
+```
+
+```{r, fig.dpi = 600, fig.width=6.5}
+# MODIFY SLOPES DATA FRAME TO SET THE X AND Y COORDINATES ---------------------
+slopes %<>%
+  mutate(Avg_weight_kgs = 106.5,
+         N_months_post_id = 1.5)
+
+# BASE PLOT OF OBSERVED WEIGHTS IN EACH MONTH AFTER INDEX ---------------------
+observed_vals %>%
+  filter(FMphys == 0) %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_weight_kgs)) +
+  geom_line() +
+  geom_line(data = overlay_data, linetype = 3, color = "blue") +
+  facet_wrap(~ Intervention, labeller = facet_labels) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  # ylim(ylims) +
+  ylab("Average weight (kgs)") +
+  xlab("Months after index visit") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2) +
+  theme(strip.text = element_text(face="bold"))
+```
+
+## Years in practice (4-8 years)
+```{r}
+mod_data %<>%
+  mutate(yr_prac_0_4 = ifelse(Years_in_prac_cat == "0-4", 1, 0),
+         yr_prac_4_8 = ifelse(Years_in_prac_cat == "4-8", 1, 0),
+         yr_prac_12_16 = ifelse(Years_in_prac_cat == "12-16", 1, 0),
+         yr_prac_16_20 = ifelse(Years_in_prac_cat == "16-20", 1, 0)) 
+```
+
+```{r, eval = FALSE}
+# One way of specifying the model is to use the binary variables omitting the reference
+lmer_mod_bin <- lmerTest::lmer(Weight_dv ~
+    
+    # age - age_lt_45 is the reference
+    age_45_to_60 + age_gt_60 +
+
+    # sex, sex_f is the reference
+    sex_m + Years_in_prac_cat +
+
+    # race ethnicity - reth_nhw is the reference non-hispanic white
+    reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+    # year at index - year_at_ind0 is the reference
+    year_at_ind1 + year_at_ind2 + year_at_ind3 + year_at_ind4 +
+
+    # Weight at baseline
+    Weight_bl + Intervention + Control:yr_prac_0_4 + Control:yr_prac_4_8 + Control:yr_prac_12_16 + Control:yr_prac_16_20 +
+
+    # Slope1 is the same as Phase/Intervention group
+    Intervention:N_months_post_id + Intervention:N_months_post_180 +
+
+    # Slope2 is the opposite
+    Control:N_months_post_id + Control:N_months_post_180 +
+
+    # Moderator terms
+    Intervention:N_months_post_id:yr_prac_0_4 + Intervention:N_months_post_180:yr_prac_0_4 +
+        
+    Control:N_months_post_id:yr_prac_0_4 + Control:N_months_post_180:yr_prac_0_4 +
+    
+    # Moderator terms
+    Intervention:N_months_post_id:yr_prac_4_8 + Intervention:N_months_post_180:yr_prac_4_8 +
+        
+    Control:N_months_post_id:yr_prac_4_8 + Control:N_months_post_180:yr_prac_4_8 +
+
+    # Moderator terms
+    Intervention:N_months_post_id:yr_prac_12_16 + Intervention:N_months_post_180:yr_prac_12_16 +
+        
+    Control:N_months_post_id:yr_prac_12_16 + Control:N_months_post_180:yr_prac_12_16 +
+
+    # Moderator terms
+    Intervention:N_months_post_id:yr_prac_16_20 + Intervention:N_months_post_180:yr_prac_16_20 +
+        
+    Control:N_months_post_id:yr_prac_16_20 + Control:N_months_post_180:yr_prac_16_20 +
+
+    # Clustering
+    (1| Arb_PersonId),
+
+    # Input data frame
+    data = mod_data
+    )
+```
+
+```{r}
+# Another way of specifying the model is to use the Categorical variable, but
+# will result in a warning about rank deficiency, but all of the parameter
+# estimates will still match.
+lmer_mod_bin <- lmerTest::lmer(Weight_dv ~
+    
+    # age - age_lt_45 is the reference
+    age_45_to_60 + age_gt_60 +
+
+    # sex, sex_f is the reference
+    sex_m + Years_in_prac_cat +
+
+    # race ethnicity - reth_nhw is the reference non-hispanic white
+    reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+    # year at index - year_at_ind0 is the reference
+    year_at_ind1 + year_at_ind2 + year_at_ind3 + year_at_ind4 +
+
+    # Weight at baseline
+    Weight_bl + Intervention + Control:Years_in_prac_cat +
+
+    # Slope1 is the same as Phase/Intervention group
+    Intervention:N_months_post_id + Intervention:N_months_post_180 +
+
+    # Slope2 is the opposite
+    Control:N_months_post_id + Control:N_months_post_180 +
+
+    # Moderator terms
+    Intervention:N_months_post_id:Years_in_prac_cat + Intervention:N_months_post_180:Years_in_prac_cat +
+        
+    Control:N_months_post_id:Years_in_prac_cat + Control:N_months_post_180:Years_in_prac_cat +
+
+    # Clustering
+    (1| Arb_PersonId),
+
+    # Input data frame
+    data = mod_data
+    )
+```
+
+```{r}
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since 
+# covariates are time invarying within phase, it's not necessary to capture the 
+# index visit
+overlay_data <- 
+mod_data %>%
+  filter(Years_in_prac_cat == "4-8") %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3, year_at_ind4,
+       Weight_bl, Intervention, Control,
+       N_months_post_id, N_months_post_180) %>%
+  group_by(Intervention) %>%
+  summarise_all(mean, .groups = "drop") %>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18), 2)) %>%
+  mutate(N_months_post_180 = rep(c(0, 0, 12), 2)) %>%
+  mutate(Years_in_prac_cat = "4-8")
+```
+
+```{r}
+# Get the predicted values
+overlay_data %<>%
+    mutate(predicted = predict(lmer_mod_bin, overlay_data, re.form = NA))
+```
+
+```{r}
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_months_post_id, predicted, Intervention) %>%
+  rename(Avg_weight_kgs = predicted)
+```
+
+```{r}
+# Years in practice categorical: 4-8  -----------------------------------------
+observed_vals <- 
+    mod_data %>%
+    filter(Years_in_prac_cat == "4-8") %>%
+    mutate(observed = Weight_dv) %>%
+    select(Arb_PersonId, Arb_EncounterId, observed, Intervention, Years_in_prac_cat)
+```
+
+```{r}
+# Need to get the original N_months_post_id variable back into the data set
+# to use for plotting along the X axis
+# N_months_post_id <- data %>%
+#   filter(Arb_EncounterId %in% mod_data$Arb_EncounterId) %>%
+#   select(Arb_EncounterId, N_months_post_id)
+```
+
+```{r}
+# *** MODIFY THE SEX VARIABLE FOR OTHER FIGURES
+observed_vals %<>%
+  left_join(., N_months_post_id, by = "Arb_EncounterId") %>%
+  select(-Arb_EncounterId) %>%
+  group_by(Arb_PersonId, Intervention, N_months_post_id, Years_in_prac_cat) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  select(-Arb_PersonId) %>%
+  group_by(N_months_post_id, Intervention, Years_in_prac_cat) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  mutate(Avg_weight_kgs = observed) %>%
+  filter(N_months_post_id <= 18)
+```
+
+```{r}
+# Create the slopes data frame to plote the slopes in control and in 
+# intervention as geom_text() elements
+
+slopes <- overlay_data %>%
+  mutate(slope = Avg_weight_kgs - lag(Avg_weight_kgs)) %>%
+  filter(N_months_post_id != 0) %>%
+  mutate(slope = ifelse(N_months_post_id == 6, slope / 6, slope)) %>%
+  mutate(slope = ifelse(N_months_post_id == 18, slope / 12, slope)) %>%
+  mutate(slope = round(slope, 2)) %>%
+  # mutate(Intervention = ifelse(Intervention == 0, "Con", "Int")) %>%
+  select(-Avg_weight_kgs) %>%
+  group_by(Intervention) %>%
+  pivot_wider(names_from = "N_months_post_id", values_from = "slope") %>%
+  ungroup() %>%
+  mutate(lab = str_c("Rate of change\n0-6mo: ", `6`, " kg/month\n6-18mo: ", `18`, " kg/month"))
+```
+
+```{r, fig.dpi = 600, fig.width=6.5}
+# MODIFY SLOPES DATA FRAME TO SET THE X AND Y COORDINATES ---------------------
+slopes %<>%
+  mutate(Avg_weight_kgs = 105.5,
+         N_months_post_id = 1.5)
+
+# BASE PLOT OF OBSERVED WEIGHTS IN EACH MONTH AFTER INDEX ---------------------
+observed_vals %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_weight_kgs)) +
+  geom_line() +
+  geom_line(data = overlay_data, linetype = 3, color = "blue") +
+  facet_wrap(~ Intervention, labeller = facet_labels) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  # ylim(ylims) +
+  ylab("Average weight (kgs)") +
+  xlab("Months after index visit") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2) +
+  theme(strip.text = element_text(face="bold"))
+```
+
+## Years in practice (8-12, reference)
+```{r}
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since 
+# covariates are time invarying within phase, it's not necessary to capture the 
+# index visit
+overlay_data <- 
+mod_data %>%
+  filter(Years_in_prac_cat == "8-12") %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3, year_at_ind4,
+       Weight_bl, Intervention, Control,
+       N_months_post_id, N_months_post_180) %>%
+  group_by(Intervention) %>%
+  summarise_all(mean, .groups = "drop") %>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18), 2)) %>%
+  mutate(N_months_post_180 = rep(c(0, 0, 12), 2)) %>%
+  mutate(Years_in_prac_cat = "8-12")
+```
+
+```{r}
+# Get the predicted values
+overlay_data %<>%
+    mutate(predicted = predict(lmer_mod_bin, overlay_data, re.form = NA))
+```
+
+```{r}
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_months_post_id, predicted, Intervention) %>%
+  rename(Avg_weight_kgs = predicted)
+```
+
+```{r}
+# Years in practice categorical: 8-12  ----------------------------------------
+observed_vals <- 
+    mod_data %>%
+    filter(Years_in_prac_cat == "8-12") %>%
+    mutate(observed = Weight_dv) %>%
+    select(Arb_PersonId, Arb_EncounterId, observed, Intervention, Years_in_prac_cat)
+```
+
+```{r}
+# Need to get the original N_months_post_id variable back into the data set
+# to use for plotting along the X axis
+# N_months_post_id <- data %>%
+#   filter(Arb_EncounterId %in% mod_data$Arb_EncounterId) %>%
+#   select(Arb_EncounterId, N_months_post_id)
+```
+
+```{r}
+# *** MODIFY THE SEX VARIABLE FOR OTHER FIGURES
+observed_vals %<>%
+  left_join(., N_months_post_id, by = "Arb_EncounterId") %>%
+  select(-Arb_EncounterId) %>%
+  group_by(Arb_PersonId, Intervention, N_months_post_id, Years_in_prac_cat) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  select(-Arb_PersonId) %>%
+  group_by(N_months_post_id, Intervention, Years_in_prac_cat) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  mutate(Avg_weight_kgs = observed) %>%
+  filter(N_months_post_id <= 18)
+```
+
+```{r}
+# Create the slopes data frame to plote the slopes in control and in 
+# intervention as geom_text() elements
+
+slopes <- overlay_data %>%
+  mutate(slope = Avg_weight_kgs - lag(Avg_weight_kgs)) %>%
+  filter(N_months_post_id != 0) %>%
+  mutate(slope = ifelse(N_months_post_id == 6, slope / 6, slope)) %>%
+  mutate(slope = ifelse(N_months_post_id == 18, slope / 12, slope)) %>%
+  mutate(slope = round(slope, 2)) %>%
+  # mutate(Intervention = ifelse(Intervention == 0, "Con", "Int")) %>%
+  select(-Avg_weight_kgs) %>%
+  group_by(Intervention) %>%
+  pivot_wider(names_from = "N_months_post_id", values_from = "slope") %>%
+  ungroup() %>%
+  mutate(lab = str_c("Rate of change\n0-6mo: ", `6`, " kg/month\n6-18mo: ", `18`, " kg/month"))
+```
+
+```{r, fig.dpi = 600, fig.width=6.5}
+# MODIFY SLOPES DATA FRAME TO SET THE X AND Y COORDINATES ---------------------
+slopes %<>%
+  mutate(Avg_weight_kgs = 112,
+         N_months_post_id = 1.5)
+
+# BASE PLOT OF OBSERVED WEIGHTS IN EACH MONTH AFTER INDEX ---------------------
+observed_vals %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_weight_kgs)) +
+  geom_line() +
+  geom_line(data = overlay_data, linetype = 3, color = "blue") +
+  facet_wrap(~ Intervention, labeller = facet_labels) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  # ylim(ylims) +
+  ylab("Average weight (kgs)") +
+  xlab("Months after index visit") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2) +
+  theme(strip.text = element_text(face="bold"))
+```
+
+## Insurance (Medicare)
+```{r}
+lmer_mod_bin <- lmerTest::lmer(Weight_dv ~
+    
+    # age - age_lt_45 is the reference
+    age_45_to_60 + age_gt_60 +
+
+    # sex, sex_f is the reference
+    sex_m + Insurance +
+
+    # race ethnicity - reth_nhw is the reference non-hispanic white
+    reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+    # year at index - year_at_ind0 is the reference
+    year_at_ind1 + year_at_ind2 + year_at_ind3 + year_at_ind4 +
+
+    # Weight at baseline
+    Weight_bl + Intervention + Control:Insurance +
+
+    # Slope1 is the same as Phase/Intervention group
+    Intervention:N_months_post_id + Intervention:N_months_post_180 +
+
+    # Slope2 is the opposite
+    Control:N_months_post_id + Control:N_months_post_180 +
+
+    # Moderator terms
+    Intervention:N_months_post_id:Insurance + Intervention:N_months_post_180:Insurance +
+        
+    Control:N_months_post_id:Insurance + Control:N_months_post_180:Insurance +
+
+    # Clustering
+    (1| Arb_PersonId),
+
+    # Input data frame
+    data = mod_data
+    )
+```
+
+```{r}
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since 
+# covariates are time invarying within phase, it's not necessary to capture the 
+# index visit
+overlay_data <- 
+mod_data %>%
+  filter(Insurance == "Medicare") %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3, year_at_ind4,
+       Weight_bl, Intervention, Control,
+       N_months_post_id, N_months_post_180) %>%
+  group_by(Intervention) %>%
+  summarise_all(mean, .groups = "drop") %>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18), 2)) %>%
+  mutate(N_months_post_180 = rep(c(0, 0, 12), 2)) %>%
+  mutate(Insurance = "Medicare")
+```
+
+```{r}
+# Get the predicted values
+overlay_data %<>%
+    mutate(predicted = predict(lmer_mod_bin, overlay_data, re.form = NA))
+```
+
+```{r}
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_months_post_id, predicted, Intervention) %>%
+  rename(Avg_weight_kgs = predicted)
+```
+
+```{r}
+# Years in practice categorical: 4-8  -----------------------------------------
+observed_vals <- 
+    mod_data %>%
+    filter(Insurance == "Medicare") %>%
+    mutate(observed = Weight_dv) %>%
+    select(Arb_PersonId, Arb_EncounterId, observed, Intervention, Insurance)
+```
+
+```{r}
+# *** MODIFY THE SEX VARIABLE FOR OTHER FIGURES
+observed_vals %<>%
+  left_join(., N_months_post_id, by = "Arb_EncounterId") %>%
+  select(-Arb_EncounterId) %>%
+  group_by(Arb_PersonId, Intervention, N_months_post_id, Insurance) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  select(-Arb_PersonId) %>%
+  group_by(N_months_post_id, Intervention, Insurance) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  mutate(Avg_weight_kgs = observed) %>%
+  filter(N_months_post_id <= 18)
+```
+
+```{r}
+# Create the slopes data frame to plote the slopes in control and in 
+# intervention as geom_text() elements
+
+slopes <- overlay_data %>%
+  mutate(slope = Avg_weight_kgs - lag(Avg_weight_kgs)) %>%
+  filter(N_months_post_id != 0) %>%
+  mutate(slope = ifelse(N_months_post_id == 6, slope / 6, slope)) %>%
+  mutate(slope = ifelse(N_months_post_id == 18, slope / 12, slope)) %>%
+  mutate(slope = round(slope, 2)) %>%
+  # mutate(Intervention = ifelse(Intervention == 0, "Con", "Int")) %>%
+  select(-Avg_weight_kgs) %>%
+  group_by(Intervention) %>%
+  pivot_wider(names_from = "N_months_post_id", values_from = "slope") %>%
+  ungroup() %>%
+  mutate(lab = str_c("Rate of change\n0-6mo: ", `6`, " kg/month\n6-18mo: ", `18`, " kg/month"))
+```
+
+```{r, fig.dpi = 600, fig.width=6.5}
+# MODIFY SLOPES DATA FRAME TO SET THE X AND Y COORDINATES ---------------------
+slopes %<>%
+  mutate(Avg_weight_kgs = 109,
+         N_months_post_id = 1.5)
+
+# BASE PLOT OF OBSERVED WEIGHTS IN EACH MONTH AFTER INDEX ---------------------
+observed_vals %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_weight_kgs)) +
+  geom_line() +
+  geom_line(data = overlay_data, linetype = 3, color = "blue") +
+  facet_wrap(~ Intervention, labeller = facet_labels) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  # ylim(ylims) +
+  ylab("Average weight (kgs)") +
+  xlab("Months after index visit") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2) +
+  theme(strip.text = element_text(face="bold"))
+```
+
+## Insurance (Commercial, reference)
+```{r}
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since 
+# covariates are time invarying within phase, it's not necessary to capture the 
+# index visit
+overlay_data <- 
+mod_data %>%
+  filter(Insurance == "Commercial") %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3, year_at_ind4,
+       Weight_bl, Intervention, Control,
+       N_months_post_id, N_months_post_180) %>%
+  group_by(Intervention) %>%
+  summarise_all(mean, .groups = "drop") %>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18), 2)) %>%
+  mutate(N_months_post_180 = rep(c(0, 0, 12), 2)) %>%
+  mutate(Insurance = "Commercial")
+```
+
+```{r}
+# Get the predicted values
+overlay_data %<>%
+    mutate(predicted = predict(lmer_mod_bin, overlay_data, re.form = NA))
+```
+
+```{r}
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_months_post_id, predicted, Intervention) %>%
+  rename(Avg_weight_kgs = predicted)
+```
+
+```{r}
+# Years in practice categorical: 8-12  ----------------------------------------
+observed_vals <- 
+    mod_data %>%
+    filter(Insurance == "Commercial") %>%
+    mutate(observed = Weight_dv) %>%
+    select(Arb_PersonId, Arb_EncounterId, observed, Intervention, Insurance)
+```
+
+```{r}
+# *** MODIFY THE SEX VARIABLE FOR OTHER FIGURES
+observed_vals %<>%
+  left_join(., N_months_post_id, by = "Arb_EncounterId") %>%
+  select(-Arb_EncounterId) %>%
+  group_by(Arb_PersonId, Intervention, N_months_post_id, Insurance) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  select(-Arb_PersonId) %>%
+  group_by(N_months_post_id, Intervention, Insurance) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  mutate(Avg_weight_kgs = observed) %>%
+  filter(N_months_post_id <= 18)
+```
+
+```{r}
+# Create the slopes data frame to plote the slopes in control and in 
+# intervention as geom_text() elements
+
+slopes <- overlay_data %>%
+  mutate(slope = Avg_weight_kgs - lag(Avg_weight_kgs)) %>%
+  filter(N_months_post_id != 0) %>%
+  mutate(slope = ifelse(N_months_post_id == 6, slope / 6, slope)) %>%
+  mutate(slope = ifelse(N_months_post_id == 18, slope / 12, slope)) %>%
+  mutate(slope = round(slope, 2)) %>%
+  # mutate(Intervention = ifelse(Intervention == 0, "Con", "Int")) %>%
+  select(-Avg_weight_kgs) %>%
+  group_by(Intervention) %>%
+  pivot_wider(names_from = "N_months_post_id", values_from = "slope") %>%
+  ungroup() %>%
+  mutate(lab = str_c("Rate of change\n0-6mo: ", `6`, " kg/month\n6-18mo: ", `18`, " kg/month"))
+```
+
+```{r, fig.dpi = 600, fig.width=6.5}
+# MODIFY SLOPES DATA FRAME TO SET THE X AND Y COORDINATES ---------------------
+slopes %<>%
+  mutate(Avg_weight_kgs = 108,
+         N_months_post_id = 1.5)
+
+# BASE PLOT OF OBSERVED WEIGHTS IN EACH MONTH AFTER INDEX ---------------------
+observed_vals %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_weight_kgs)) +
+  geom_line() +
+  geom_line(data = overlay_data, linetype = 3, color = "blue") +
+  facet_wrap(~ Intervention, labeller = facet_labels) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  # ylim(ylims) +
+  ylab("Average weight (kgs)") +
+  xlab("Months after index visit") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2) +
+  theme(strip.text = element_text(face="bold"))
+```
+
+## Former Smoker
+```{r}
+lmer_mod_bin <- lmerTest::lmer(Weight_dv ~
+    
+    # age - age_lt_45 is the reference
+    age_45_to_60 + age_gt_60 +
+
+    # sex, sex_f is the reference
+    sex_m +  Former_Smoker +
+
+    # race ethnicity - reth_nhw is the reference non-hispanic white
+    reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+    # year at index - year_at_ind0 is the reference
+    year_at_ind1 + year_at_ind2 + year_at_ind3 + year_at_ind4 +
+
+    # Weight at baseline
+    Weight_bl + Intervention + Control:Former_Smoker +
+
+    # Slope1 is the same as Phase/Intervention group
+    Intervention:N_months_post_id + Intervention:N_months_post_180 +
+
+    # Slope2 is the opposite
+    Control:N_months_post_id + Control:N_months_post_180 +
+
+    # Moderator terms
+    Intervention:N_months_post_id:Former_Smoker + Intervention:N_months_post_180:Former_Smoker +
+        
+    Control:N_months_post_id:Former_Smoker + Control:N_months_post_180:Former_Smoker +
+
+    # Clustering
+    (1| Arb_PersonId),
+
+    # Input data frame
+    data = mod_data
+    )
+```
+
+```{r}
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since 
+# covariates are time invarying within phase, it's not necessary to capture the 
+# index visit
+overlay_data <- 
+mod_data %>%
+  filter(Former_Smoker == 1) %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m, Former_Smoker,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3, year_at_ind4,
+       Weight_bl, Intervention, Control,
+       N_months_post_id, N_months_post_180) %>%
+  group_by(Intervention) %>%
+  summarise_all(mean, .groups = "drop") %>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18), 2)) %>%
+  mutate(N_months_post_180 = rep(c(0, 0, 12), 2))
+```
+
+```{r}
+# Get the predicted values
+overlay_data %<>%
+    mutate(predicted = predict(lmer_mod_bin, overlay_data, re.form = NA))
+```
+
+```{r}
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_months_post_id, predicted, Intervention) %>%
+  rename(Avg_weight_kgs = predicted)
+```
+
+```{r}
+# Former_Smoker  -----------------------------------------
+observed_vals <- 
+    mod_data %>%
+    filter(Former_Smoker == 1) %>%
+    mutate(observed = Weight_dv) %>%
+    select(Arb_PersonId, Arb_EncounterId, observed, Intervention, Former_Smoker)
+```
+
+```{r}
+# *** MODIFY THE SEX VARIABLE FOR OTHER FIGURES
+observed_vals %<>%
+  left_join(., N_months_post_id, by = "Arb_EncounterId") %>%
+  select(-Arb_EncounterId) %>%
+  group_by(Arb_PersonId, Intervention, N_months_post_id, Former_Smoker) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  select(-Arb_PersonId) %>%
+  group_by(N_months_post_id, Intervention, Former_Smoker) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  mutate(Avg_weight_kgs = observed) %>%
+  filter(N_months_post_id <= 18)
+```
+
+```{r}
+# Create the slopes data frame to plote the slopes in control and in 
+# intervention as geom_text() elements
+
+slopes <- overlay_data %>%
+  mutate(slope = Avg_weight_kgs - lag(Avg_weight_kgs)) %>%
+  filter(N_months_post_id != 0) %>%
+  mutate(slope = ifelse(N_months_post_id == 6, slope / 6, slope)) %>%
+  mutate(slope = ifelse(N_months_post_id == 18, slope / 12, slope)) %>%
+  mutate(slope = round(slope, 2)) %>%
+  # mutate(Intervention = ifelse(Intervention == 0, "Con", "Int")) %>%
+  select(-Avg_weight_kgs) %>%
+  group_by(Intervention) %>%
+  pivot_wider(names_from = "N_months_post_id", values_from = "slope") %>%
+  ungroup() %>%
+  mutate(lab = str_c("Rate of change\n0-6mo: ", `6`, " kg/month\n6-18mo: ", `18`, " kg/month"))
+```
+
+```{r, fig.dpi = 600, fig.width=6.5}
+# MODIFY SLOPES DATA FRAME TO SET THE X AND Y COORDINATES ---------------------
+slopes %<>%
+  mutate(Avg_weight_kgs = 106,
+         N_months_post_id = 1.5)
+
+# BASE PLOT OF OBSERVED WEIGHTS IN EACH MONTH AFTER INDEX ---------------------
+observed_vals %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_weight_kgs)) +
+  geom_line() +
+  geom_line(data = overlay_data, linetype = 3, color = "blue") +
+  facet_wrap(~ Intervention, labeller = facet_labels) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  # ylim(ylims) +
+  ylab("Average weight (kgs)") +
+  xlab("Months after index visit") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2) +
+  theme(strip.text = element_text(face="bold"))
+```
+
+## Non-Former Smoker (reference)
+```{r}
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since 
+# covariates are time invarying within phase, it's not necessary to capture the 
+# index visit
+overlay_data <- 
+mod_data %>%
+  filter(Former_Smoker == 0) %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m, Former_Smoker,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3, year_at_ind4,
+       Weight_bl, Intervention, Control,
+       N_months_post_id, N_months_post_180) %>%
+  group_by(Intervention) %>%
+  summarise_all(mean, .groups = "drop") %>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18), 2)) %>%
+  mutate(N_months_post_180 = rep(c(0, 0, 12), 2))
+
+```
+
+```{r}
+# Get the predicted values
+overlay_data %<>%
+    mutate(predicted = predict(lmer_mod_bin, overlay_data, re.form = NA))
+```
+
+```{r}
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_months_post_id, predicted, Intervention) %>%
+  rename(Avg_weight_kgs = predicted)
+```
+
+```{r}
+# Years in practice categorical: 8-12  ----------------------------------------
+observed_vals <- 
+    mod_data %>%
+    filter(Former_Smoker == 0) %>%
+    mutate(observed = Weight_dv) %>%
+    select(Arb_PersonId, Arb_EncounterId, observed, Intervention, Former_Smoker)
+```
+
+
+
+```{r}
+# *** MODIFY THE SEX VARIABLE FOR OTHER FIGURES
+observed_vals %<>%
+  left_join(., N_months_post_id, by = "Arb_EncounterId") %>%
+  select(-Arb_EncounterId) %>%
+  group_by(Arb_PersonId, Intervention, N_months_post_id, Former_Smoker) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  select(-Arb_PersonId) %>%
+  group_by(N_months_post_id, Intervention, Former_Smoker) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  mutate(Avg_weight_kgs = observed) %>%
+  filter(N_months_post_id <= 18)
+```
+
+```{r}
+# Create the slopes data frame to plote the slopes in control and in 
+# intervention as geom_text() elements
+
+slopes <- overlay_data %>%
+  mutate(slope = Avg_weight_kgs - lag(Avg_weight_kgs)) %>%
+  filter(N_months_post_id != 0) %>%
+  mutate(slope = ifelse(N_months_post_id == 6, slope / 6, slope)) %>%
+  mutate(slope = ifelse(N_months_post_id == 18, slope / 12, slope)) %>%
+  mutate(slope = round(slope, 2)) %>%
+  # mutate(Intervention = ifelse(Intervention == 0, "Con", "Int")) %>%
+  select(-Avg_weight_kgs) %>%
+  group_by(Intervention) %>%
+  pivot_wider(names_from = "N_months_post_id", values_from = "slope") %>%
+  ungroup() %>%
+  mutate(lab = str_c("Rate of change\n0-6mo: ", `6`, " kg/month\n6-18mo: ", `18`, " kg/month"))
+```
+
+```{r, fig.dpi = 600, fig.width=6.5}
+# MODIFY SLOPES DATA FRAME TO SET THE X AND Y COORDINATES ---------------------
+slopes %<>%
+  mutate(Avg_weight_kgs = 112,
+         N_months_post_id = 1.5)
+
+# BASE PLOT OF OBSERVED WEIGHTS IN EACH MONTH AFTER INDEX ---------------------
+observed_vals %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_weight_kgs)) +
+  geom_line() +
+  geom_line(data = overlay_data, linetype = 3, color = "blue") +
+  facet_wrap(~ Intervention, labeller = facet_labels) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  # ylim(ylims) +
+  ylab("Average weight (kgs)") +
+  xlab("Months after index visit") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2) +
+  theme(strip.text = element_text(face="bold"))
+```
+
+
+## BMI
+<!-- *************************** BMI *********************************** -->
+```{r}
+# Fit a model where Gender is the moderator -----------------------------------
+lmer_mod_bin <- lmerTest::lmer(Weight_dv ~
+    
+    # age - age_lt_45 is the reference
+    age_45_to_60 + age_gt_60 +
+
+    # sex, sex_f is the reference
+    sex_m + BMI_bl_rscl +
+
+    # race ethnicity - reth_nhw is the reference non-hispanic white
+    reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+    # year at index - year_at_ind0 is the reference
+    year_at_ind1 + year_at_ind2 + year_at_ind3 + year_at_ind4 +
+
+    # Weight at baseline
+    Weight_bl + Intervention + Control:BMI_bl_rscl +
+
+    # Slope1 is the same as Phase/Intervention group
+    Intervention:N_months_post_id + Intervention:N_months_post_180 +
+
+    # Slope2 is the opposite
+    Control:N_months_post_id + Control:N_months_post_180 +
+
+    # Moderator terms
+    Intervention:N_months_post_id:BMI_bl_rscl + Intervention:N_months_post_180:BMI_bl_rscl +
+        
+    Control:N_months_post_id:BMI_bl_rscl + Control:N_months_post_180:BMI_bl_rscl +
+
+    # Clustering
+    (1| Arb_PersonId),
+
+    # Input data frame
+    data = mod_data
+    )
+```
+
+<!-- BMI Plot 1 where BMI is 0 -->
+```{r}
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since 
+# covariates are time invarying within phase, it's not necessary to capture the 
+# index visit
+overlay_data <- 
+mod_data %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3, year_at_ind4,
+       Weight_bl, Intervention, Control,
+       N_months_post_id, N_months_post_180) %>%
+  group_by(Intervention) %>%
+  summarise_all(mean, .groups = "drop") %>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18), 2)) %>%
+  mutate(N_months_post_180 = rep(c(0, 0, 12), 2)) %>%
+  mutate(BMI_bl_rscl = 0)
+```
+
+```{r}
+# Get the predicted values
+overlay_data %<>%
+    mutate(predicted = predict(lmer_mod_bin, overlay_data, re.form = NA))
+```
+
+```{r}
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_months_post_id, predicted, Intervention) %>%
+  rename(Avg_weight_kgs = predicted)
+```
+
+```{r}
+# BMI ----------------------------------------------------------------------
+observed_vals <- 
+    mod_data %>%
+    mutate(observed = Weight_dv) %>%
+    select(Arb_PersonId, Arb_EncounterId, observed, Intervention)
+```
+
+```{r}
+# Need to get the original N_months_post_id variable back into the data set
+# to use for plotting along the X axis
+N_months_post_id <- data %>%
+  filter(Arb_EncounterId %in% mod_data$Arb_EncounterId) %>%
+  select(Arb_EncounterId, N_months_post_id)
+```
+
+```{r}
+# *** MODIFY THE SEX VARIABLE FOR OTHER FIGURES
+observed_vals %<>%
+  left_join(., N_months_post_id, by = "Arb_EncounterId") %>%
+  select(-Arb_EncounterId) %>%
+  group_by(Arb_PersonId, Intervention, N_months_post_id) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  select(-Arb_PersonId) %>%
+  group_by(N_months_post_id, Intervention) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  mutate(Avg_weight_kgs = observed) %>%
+  filter(N_months_post_id <= 18)
+```
+
+```{r}
+# Create the slopes data frame to plote the slopes in control and in 
+# intervention as geom_text() elements
+
+slopes <- overlay_data %>%
+  mutate(slope = Avg_weight_kgs - lag(Avg_weight_kgs)) %>%
+  filter(N_months_post_id != 0) %>%
+  mutate(slope = ifelse(N_months_post_id == 6, slope / 6, slope)) %>%
+  mutate(slope = ifelse(N_months_post_id == 18, slope / 12, slope)) %>%
+  mutate(slope = round(slope, 2)) %>%
+  # mutate(Intervention = ifelse(Intervention == 0, "Con", "Int")) %>%
+  select(-Avg_weight_kgs) %>%
+  group_by(Intervention) %>%
+  pivot_wider(names_from = "N_months_post_id", values_from = "slope") %>%
+  ungroup() %>%
+  mutate(lab = str_c("Rate of change\n0-6mo: ", `6`, " kg/month\n6-18mo: ", `18`, " kg/month"))
+```
+
+```{r, fig.dpi = 600, fig.width=6.5}
+# MODIFY SLOPES DATA FRAME TO SET THE X AND Y COORDINATES ---------------------
+slopes %<>%
+  mutate(Avg_weight_kgs = 112,
+         N_months_post_id = 1.5)
+
+# BASE PLOT OF OBSERVED WEIGHTS IN EACH MONTH AFTER INDEX ---------------------
+observed_vals %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_weight_kgs)) +
+  geom_line() +
+  geom_line(data = overlay_data, linetype = 3, color = "blue") +
+  facet_wrap(~ Intervention, labeller = facet_labels) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  # ylim(ylims) +
+  ylab("Average weight (kgs)") +
+  xlab("Months after index visit") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2) +
+  theme(strip.text = element_text(face="bold"))
+```
+
+<!-- Plots for when BMI_bl_rscl = 1 -->
+```{r}
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since 
+# covariates are time invarying within phase, it's not necessary to capture the 
+# index visit
+overlay_data <- 
+mod_data %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3, year_at_ind4,
+       Weight_bl, Intervention, Control,
+       N_months_post_id, N_months_post_180) %>%
+  group_by(Intervention) %>%
+  summarise_all(mean, .groups = "drop") %>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18), 2)) %>%
+  mutate(N_months_post_180 = rep(c(0, 0, 12), 2)) %>%
+  mutate(BMI_bl_rscl = 1)
+```
+```{r}
+# Get the predicted values
+overlay_data %<>%
+    mutate(predicted = predict(lmer_mod_bin, overlay_data, re.form = NA))
+```
+
+```{r}
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_months_post_id, predicted, Intervention) %>%
+  rename(Avg_weight_kgs = predicted)
+```
+
+```{r}
+# BMI ----------------------------------------------------------------------
+observed_vals <- 
+    mod_data %>%
+    mutate(observed = Weight_dv) %>%
+    select(Arb_PersonId, Arb_EncounterId, observed, Intervention)
+```
+
+```{r}
+# Need to get the original N_months_post_id variable back into the data set
+# to use for plotting along the X axis
+N_months_post_id <- data %>%
+  filter(Arb_EncounterId %in% mod_data$Arb_EncounterId) %>%
+  select(Arb_EncounterId, N_months_post_id)
+```
+
+```{r}
+# *** MODIFY THE SEX VARIABLE FOR OTHER FIGURES
+observed_vals %<>%
+  left_join(., N_months_post_id, by = "Arb_EncounterId") %>%
+  select(-Arb_EncounterId) %>%
+  group_by(Arb_PersonId, Intervention, N_months_post_id) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  select(-Arb_PersonId) %>%
+  group_by(N_months_post_id, Intervention) %>% # *** MODIFY VARIABLE HERE
+  summarise_all(mean, .groups = "drop") %>%
+  ungroup() %>%
+  mutate(Avg_weight_kgs = observed) %>%
+  filter(N_months_post_id <= 18)
+```
+
+```{r}
+# Create the slopes data frame to plote the slopes in control and in 
+# intervention as geom_text() elements
+
+slopes <- overlay_data %>%
+  mutate(slope = Avg_weight_kgs - lag(Avg_weight_kgs)) %>%
+  filter(N_months_post_id != 0) %>%
+  mutate(slope = ifelse(N_months_post_id == 6, slope / 6, slope)) %>%
+  mutate(slope = ifelse(N_months_post_id == 18, slope / 12, slope)) %>%
+  mutate(slope = round(slope, 2)) %>%
+  # mutate(Intervention = ifelse(Intervention == 0, "Con", "Int")) %>%
+  select(-Avg_weight_kgs) %>%
+  group_by(Intervention) %>%
+  pivot_wider(names_from = "N_months_post_id", values_from = "slope") %>%
+  ungroup() %>%
+  mutate(lab = str_c("Rate of change\n0-6mo: ", `6`, " kg/month\n6-18mo: ", `18`, " kg/month"))
+```
+
+```{r, fig.dpi = 600, fig.width=6.5}
+# MODIFY SLOPES DATA FRAME TO SET THE X AND Y COORDINATES ---------------------
+slopes %<>%
+  mutate(Avg_weight_kgs = 112,
+         N_months_post_id = 1.5)
+
+# BASE PLOT OF OBSERVED WEIGHTS IN EACH MONTH AFTER INDEX ---------------------
+observed_vals %>%
+  ggplot(., aes(x = N_months_post_id, y = Avg_weight_kgs)) +
+  geom_line() +
+  geom_line(data = overlay_data, linetype = 3, color = "blue") +
+  facet_wrap(~ Intervention, labeller = facet_labels) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  # ylim(ylims) +
+  ylab("Average weight (kgs)") +
+  xlab("Months after index visit") +
+  geom_text(data = slopes, 
+            aes(x = N_months_post_id, 
+                y = Avg_weight_kgs, 
+                label = lab,
+                hjust = "left"),
+                size = 2) +
+  # theme(strip.text.x = element_blank())
+  theme(strip.text = element_text(face="bold"))
+```
+
