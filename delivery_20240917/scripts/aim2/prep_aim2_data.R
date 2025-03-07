@@ -342,6 +342,12 @@ nppes <-
   haven::read_sas(
     "D:\\PATHWEIGH\\delivery_20240917\\scripts\\aim2\\nppes_data.sas7bdat")
 
+
+# Start with pp_data
+pp_data %>%
+  distinct(ProviderNpi) %>%
+  nrow()
+
 nppes %<>%
   mutate(ProviderNpi = as.numeric(NPI)) %>%
   select(-NPI)
@@ -358,7 +364,25 @@ n_visits_per_npi %>%
   geom_histogram()
 
 
-# Get the provider NPIs for the encounter Ids in pp_data to merge in the
+# Get the provider NPIs for the encounter Ids in pp_data to merge
+# with th nppes data
+
+# Create the Years in practice variable
+nppes %<>%
+  mutate(Years_in_prac = 2024 - YearReg)
+
+# Categorize Years in practice
+nppes %<>%
+  mutate(Years_in_prac_cat = cut(Years_in_prac, breaks = seq(0, 20, 4)))
+
+# Merge in the nppes data by provider NPI insteadof encounter ID to avoid
+# the error below
+pp_data %<>%
+  left_join(., nppes, by = "ProviderNpi")
+
+
+# /////////////////////////// ERROR HERE //////////////////////////////////////
+# *** Results in 81,232 rows instead of the expected 81,468, a differens of 236
 encounter_ids_w_npi <- visits %>%
   filter(Arb_EncounterId %in% pp_data$Arb_EncounterId) %>%
   select(Arb_EncounterId, ProviderNpi)
@@ -393,6 +417,39 @@ provider_characteristics %<>%
 # Merge provider characteristics into pp_data
 pp_data %<>%
   left_join(., provider_characteristics, by = c("Arb_EncounterId"))
+#  ////////////////////////////////////////////////////////////////////////////
+
+# Check the values of NAs in the provider types
+# *** Still ended up in an error
+pp_data %>% filter(is.na(FMphys))
+pp_data %>% filter(is.na(IMphys))
+pp_data %>% filter(is.na(OTHphys))
+
+pp_data %>% filter(is.na(FMAPP))
+pp_data %>% filter(is.na(IMAPP))
+pp_data %>% filter(is.na(OTHAPP))
+
+missing_provider_npis <- pp_data %>%
+  filter(is.na(FMphys)) %>%
+  select(ProviderNpi)
+
+nppes %>%
+  filter(ProviderNpi %in% missing_provider_npis$ProviderNpi)
+
+# Nppes is 844 unique providers
+nppes %>% distinct(ProviderNpi)
+
+# PP_data is 845 unique providers, so only one should be missing
+pp_data %>% distinct(ProviderNpi)
+
+pp_data %>%
+  distinct(ProviderNpi) %>%
+  filter(!ProviderNpi %in% nppes$ProviderNpi)
+
+nppes %>%
+  distinct(ProviderNpi) %>%
+  filter(!ProviderNpi %in% pp_data$ProviderNpi)
+
 
 # Merge cfte now that each row has the ProviderNPI in pp_data
 pp_data %<>%
@@ -432,6 +489,19 @@ n_visits_per_npi %>%
 ee_ene %<>%
   filter(Arb_EncounterId %in% pp_data$Arb_EncounterId) %>%
   mutate(Arb_PersonId = factor(Arb_PersonId))
+
+## Creae patient follow up ----
+# Count the number of follow up visits in each phase for each patient
+follow_up <- pp_data %>%
+  filter(IndexVisit == 0) %>%
+  group_by(Arb_PersonId, Intervention) %>%
+  count() %>%
+  ungroup() %>%
+  mutate(n_follow_up = n) %>%
+  select(-n)
+
+pp_data %<>%
+  left_join(., follow_up, by = c("Arb_PersonId", "Intervention"))
 
 ## Create Former smoker ----
 # Smoking status is already in pp_data, but not time invariant, this chunk
