@@ -1,0 +1,78 @@
+---
+title: "Aim 3: EE vs ENE"
+format:
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+    toc: true
+
+# format:
+#   html:
+#     toc: true
+#     embed-resources: true
+
+execute: 
+  echo: false
+---
+
+
+```{r}
+# Load libraries
+library(magrittr, include = "%<>%")
+pacman::p_load(tidyverse,
+               gtsummary,
+               here,
+               furrr,
+               openxlsx,
+               geepack)
+```
+
+```{r}
+# Load data
+# Set Cystatin C column to for importing as double, otherwise there may be too
+# many NAs in the first x rows where read_csv() decides what column to assign.
+# It may then assign first as logical, but then encounters a problem when it
+# finally encounters a numeric value.
+data <- read_csv("D:\\PATHWEIGH\\delivery_20240917\\data\\aim3_data_20240917.csv",
+                 col_types = cols(`Cystatin C` = col_double()))
+```
+
+
+# 1
+H0: the likelihood of an individual being in the EE group in the control phase = the likelihood of an individual being in the EE group in the intervention phase; Ha: ≠
+```{r}
+# Outcome binary indicator, one per patient per phase
+h1_data <- 
+  data %>%
+  group_by(Arb_PersonId, Intervention) %>%
+  slice_head() %>%
+  ungroup()
+
+# Convert Arb_PersonId to factor
+h1_data %<>%
+  mutate(Arb_PersonId = factor(Arb_PersonId)) %>%
+  mutate(Age_cat = relevel(factor(Age_cat), ref = "<=45")) %>%
+  mutate(Race_Ethnicity = relevel(factor(Race_Ethnicity), ref = "Non-Hispanic White"))
+
+```
+
+```{r, echo = TRUE}
+h1_mod <- geeglm(EE ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Intervention,
+    family = "binomial",
+    id = Arb_PersonId, 
+    data = h1_data)
+```
+
+```{r}
+tbl_regression(h1_mod, exponentiate = TRUE)
+```
+
+
+```{r}
+# How many index visits does each patient have
+data %>%
+  filter(IndexVisit == 1) %>%
+  group_by(Arb_PersonId) %>%
+  count() %>%
+  filter(n > 1) %>%
+  nrow()
+```
