@@ -537,7 +537,8 @@ pp_mod_data %<>%
          year_at_ind0 = ifelse(Year_at_ind == "Year0", 1, 0),
          year_at_ind1 = ifelse(Year_at_ind == "Year1", 1, 0),
          year_at_ind2 = ifelse(Year_at_ind == "Year2", 1, 0),
-         year_at_ind3 = ifelse(Year_at_ind == "Year3", 1, 0))
+         year_at_ind3 = ifelse(Year_at_ind == "Year3", 1, 0),
+         year_at_ind4 = ifelse(Year_at_ind == "Year4", 1, 0))
 ```
 
 ```{r}
@@ -555,6 +556,7 @@ lmer_mod_bin <- lmerTest::lmer(Weight_dv ~
 
           # year at index
           year_at_ind1 + year_at_ind2 + year_at_ind3 +
+          year_at_ind4 +
 
           # Weight at baseline
           Weight_bl + slope1 +
@@ -656,7 +658,7 @@ overlay_data <-
 pp_mod_data %>%
   select(age_lt_45, age_45_to_60, age_gt_60, sex_m,
        reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
-       year_at_ind1, year_at_ind2, year_at_ind3,
+       year_at_ind1, year_at_ind2, year_at_ind3, year_at_ind4,
        Weight_bl, slope1, slope2, Phase,
        N_days_post_id, N_days_post_180) %>%
   group_by(Phase) %>%
