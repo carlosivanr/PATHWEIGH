@@ -11,7 +11,7 @@ pacman::p_load(here,         # For managing directory paths
   tictoc,       # For timing and benchmarking functions
   gtsummary,    # For tables
   flextable,
-  install = FALSE)    
+  install = FALSE)
 
 
 # Specify parameters -----------------------------------------------------------
@@ -34,7 +34,7 @@ load(here(str_c("delivery_", delivery), str_c("data/", "econ_", delivery, ".RDat
 
 # Create a vector of encounterIds that are WPVs --------------------------------
 # Only the encounters that were designated a WPV are of interest
-wpv_encounters <- 
+wpv_encounters <-
   visits_post_id %>%
   filter(WPV > 0,
          Censored == 0) %>%
@@ -53,11 +53,11 @@ wpv_visits <-
 
 
 # Define the codes of interest -------------------------------------------------
-expected_cpt_hcspcs_codes <- 
-  c(seq(97802,97804),
-    seq(99202,99215),
-    seq(99401,99404),
-    seq(97411,97412),
+expected_cpt_hcspcs_codes <-
+  c(seq(97802, 97804),
+    seq(99202, 99215),
+    seq(99401, 99404),
+    seq(97411, 97412),
     99078,
     "G0270",
     "G0271",
@@ -66,7 +66,7 @@ expected_cpt_hcspcs_codes <-
     "G0473",
     "G2212")
 
-other_possible_codes <- 
+other_possible_codes <-
   c(seq(99385, 99387),
     seq(99395, 99397),
     seq(96150, 96155),
@@ -233,7 +233,7 @@ visits_post_id <- left_join(visits_post_id,
 tab1 <- wpv_visits %>%
   filter(Intervention == 0,
          IndexVisit == 1) %>%
-  select(code_combination) %>% 
+  select(code_combination) %>%
   mutate(code_combination = fct_na_value_to_level(code_combination, level = "Unknown")) %>%
   tbl_summary() %>%
   modify_header(., stat_0 = "Index WPV Control; N = {n}") %>%
@@ -294,3 +294,72 @@ left_join(tab1, tab2, by = "**Characteristic**") %>%
   left_join(tab5, by = "**Characteristic**") %>%
   left_join(tab6, by = "**Characteristic**") %>%
   writexl::write_xlsx(., str_c(out_path, "/cpt_code_combinations.xlsx"))
+
+
+
+
+# 2/14/2025 -------------------------------------------------------------------
+# Will need 6 subtables
+# Control Index Visits
+tab1 <- wpv_visits %>%
+  filter(Intervention == 0,
+         IndexVisit == 1) %>%
+  select(Insurance) %>%
+  mutate(Insurance = fct_na_value_to_level(Insurance, level = "Unknown")) %>%
+  tbl_summary() %>%
+  modify_header(., stat_0 = "Index WPV Control; N = {n}") %>%
+  as_tibble()
+
+tab2 <- wpv_visits %>%
+  filter(Intervention == 0,
+         IndexVisit == 0) %>%
+  select(Insurance) %>% 
+  mutate(Insurance = fct_na_value_to_level(Insurance, level = "Unknown")) %>%
+  tbl_summary() %>%
+  modify_header(., stat_0 = "Other WPV Control; N = {n}") %>%
+  as_tibble()
+
+tab3 <- wpv_visits %>%
+  filter(Intervention == 1,
+         IndexVisit == 1) %>%
+  select(Insurance) %>% 
+  mutate(Insurance = fct_na_value_to_level(Insurance, level = "Unknown")) %>%
+  tbl_summary() %>%
+  modify_header(., stat_0 = "Index WPV Intervention; N = {n}") %>%
+  as_tibble()
+
+tab4 <- wpv_visits %>%
+  filter(Intervention == 1,
+         IndexVisit == 0) %>%
+  select(Insurance) %>% 
+  mutate(Insurance = fct_na_value_to_level(Insurance, level = "Unknown")) %>%
+  tbl_summary() %>%
+  modify_header(., stat_0 = "Other WPV Intervention; N = {n}") %>%
+  as_tibble()
+
+tab5 <- wpv_visits %>%
+  filter(Intervention == 1,
+         IndexVisit == 1,
+        any_WPV == 1) %>%
+  select(Insurance) %>% 
+  mutate(Insurance = fct_na_value_to_level(Insurance, level = "Unknown")) %>%
+  tbl_summary() %>%
+  modify_header(., stat_0 = "Index WPV w/ PW Intervention; N = {n}") %>%
+  as_tibble()
+
+tab6 <- wpv_visits %>%
+  filter(Intervention == 1,
+         IndexVisit == 0,
+        any_WPV == 1) %>%
+  select(Insurance) %>% 
+  mutate(Insurance = fct_na_value_to_level(Insurance, level = "Unknown")) %>%
+  tbl_summary() %>%
+  modify_header(., stat_0 = "Other WPV w/ PW Intervention; N = {n}") %>%
+  as_tibble()
+
+left_join(tab1, tab2, by = "**Characteristic**") %>%
+  left_join(tab3, by = "**Characteristic**") %>%
+  left_join(tab4, by = "**Characteristic**") %>%
+  left_join(tab5, by = "**Characteristic**") %>%
+  left_join(tab6, by = "**Characteristic**") %>%
+  writexl::write_xlsx(., str_c(out_path, "/insurance_classifications.xlsx"))
