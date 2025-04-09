@@ -1,0 +1,59 @@
+---
+title: "Numer of patients in each year"
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+
+execute: 
+  echo: false
+---
+
+```{r}
+pacman::p_load(tidyverse, 
+               gtsummary,
+               install = FALSE)
+
+library(magrittr, include = "%<>%")
+```
+
+```{r}
+# Load visits_post_id
+load("D:/PATHWEIGH/delivery_20240917/data/all_visits_20240917.RData")
+```
+
+```{r}
+data <- visits %>%
+      mutate(
+      Year = case_when(
+        EncounterDate < "2021-03-17" ~ "Year0",
+        EncounterDate >= "2021-03-17" & EncounterDate < "2022-03-17" ~ "Year1",
+        EncounterDate >= "2022-03-17" & EncounterDate < "2023-03-17" ~ "Year2",
+        EncounterDate >= "2023-03-17" & EncounterDate < "2024-03-17" ~ "Year3",
+        EncounterDate >= "2024-03-17" & EncounterDate < "2025-03-17" ~ "Year4",
+        EncounterDate >= "2025-03-17" & EncounterDate < "2026-03-17" ~ "Year5"
+      ))
+```
+
+```{r}
+data <- data %>%
+  filter(Eligible == 1) %>%
+  group_by(Year, Intervention.factor, Arb_PersonId) %>%
+  slice_head() %>%
+  ungroup()
+```
+
+# Control
+```{r}
+data %>%
+  filter(Intervention.factor == "Control") %>%
+  select(Enrolled, Year) %>%
+  tbl_summary(by = Year)
+```
+
+# Intervention
+```{r}
+data %>%
+  filter(Intervention.factor == "Intervention") %>%
+  select(Enrolled, Year) %>%
+  tbl_summary(by = Year)
+```

@@ -1,0 +1,13 @@
+                                           The SAS System          16:53 Friday, January 3, 2025   1
+
+                                     The SURVEYSELECT Procedure
+
+                          Selection Method    Unrestricted Random Sampling
+
+                             Input Data Set                 UNIQUE_IDS
+                             Random Number Seed              426950000
+                             Sampling Rate                           1
+                             Sample Size                          9358
+                             Expected Number of Hits                 1
+                             Sampling Weight                         1
+                             Output Data Set            RESAMPLED_IDS1

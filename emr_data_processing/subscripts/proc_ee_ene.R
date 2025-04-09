@@ -28,7 +28,7 @@
 # Set data_file to the processed ee_ene data which contains all of the
 # labs procedures, comorbidities, etc. if already processed.
 data_file <- here(
-                  str_c("delivery_", data_delivery_date),
+                  proj_root_dir,
                   "data",
                   str_c("processed_ee_ene_", RData))
 
@@ -52,7 +52,7 @@ if (file.exists(data_file)) {
     # Load the column names that were added if the comorbidities were processed
     # previously processed. This will ensure that the column names that will be
     # merged will match with downstream steps
-    load("D:/PATHWEIGH/delivery_20240917/data/new_col_names_20240917.RData")
+    load(str_c("D:/PATHWEIGH/", proj_root_dir, "/data/new_col_names_20240917.RData"))
     
     ee_ene <-
       left_join(ee_ene,
@@ -135,13 +135,13 @@ if (file.exists(data_file)) {
 
   # save new_col_names
   save(new_col_names,
-       file = here(str_c("delivery_", data_delivery_date),
+       file = here(proj_root_dir,
                    "data",
                    str_c("new_col_names_", RData)))
 
   # save processed ee_ene
   save(processed_ee_ene,
-       file = here(str_c("delivery_", data_delivery_date),
+       file = here(proj_root_dir,
                    "data",
                    str_c("processed_ee_ene_", RData)))
 

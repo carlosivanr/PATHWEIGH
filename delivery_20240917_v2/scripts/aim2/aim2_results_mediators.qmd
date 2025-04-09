@@ -115,53 +115,18 @@ mod_data %<>%
 ```
 
 ```{r}
-# Count the number of weight prioritized visits
-n_wpvs <- data %>%
-  filter(WPV == 1) %>%
-  group_by(Arb_PersonId, Intervention) %>%
-  count() %>%
-  rename(n_wpvs = n) %>%
-  mutate(Arb_PersonId = factor(Arb_PersonId))
-
-
-# Count the number of visits with pw tools
-n_pw_visits <- data %>%
-  filter(PW_Visit == 1) %>%
-  group_by(Arb_PersonId, Intervention) %>%
-  count() %>%
-  rename(n_pw_visits = n) %>%
-  mutate(Arb_PersonId = factor(Arb_PersonId))
-
-# Merge in the two variables
-mod_data %<>% 
-  left_join(., n_wpvs, by = c("Arb_PersonId", "Intervention")) %>%
-  left_join(., n_pw_visits, by = c("Arb_PersonId", "Intervention"))
-
-
-# Fix the NAs created after merging the counts of WPVs and PW visits
-mod_data %<>%
-  mutate(across(n_wpvs:n_pw_visits, ~ifelse(is.na(.x), 0, .x)))
-
-```
-
-```{r}
-# mediators <- 
-#   c(
-#     "Any_ref",
-#     # "BariatricSurgery", # resulted in glm.fit: fitted probabilities numerically 0 or 1 occurred only 645 with surgery
-#     "Meds_AOM",
-#     "Meds_Gain",
-#     "Meds_Loss",
-#     "Engagement",
-#     # "Cohort3", # Should not be a mediator, the intervention has to change it some way
-#     "n_follow_up",
-#     # "composite_mediator" # based off of cohort
-#     )
-
 mediators <- 
-  c("n_wpvs"
-  #  "n_pw_visits" # algorithm did not converge
-   )
+  c(
+    "Any_ref",
+    # "BariatricSurgery", # resulted in glm.fit: fitted probabilities numerically 0 or 1 occurred only 645 with surgery
+    "Meds_AOM",
+    "Meds_Gain",
+    "Meds_Loss",
+    "Engagement",
+    "Cohort3", # Should not be a mediator, the intervention has to change it some way
+    "n_follow_up",
+    "composite_mediator"
+    )
 ```
 
 ## Original Mediator Models
@@ -310,7 +275,7 @@ for (i in 1:length(mediators)) {
   # If the mediator is binary use glm(), otherwise use lm()
   if (distinct_vals == 2) {
     med_mod <- glm(part1_formula, data = mod_data, family = binomial)
-  } else if (mediator %in% c("Engagement", "n_wpvs", "n_pw_visits")) {
+  } else if (mediator == "Engagement") {
     med_mod <- glm(part1_formula, data = mod_data, family = poisson)
   }
     
@@ -409,7 +374,7 @@ for (i in 1:length(mediators)) {
 ```
 
 
-## Mediator models with modified specifications
+## Mediator models with modified specification
 
 ```{r}
 # Create the N_months_post_180_v2 variable

@@ -1,0 +1,177 @@
+---
+title: "ITT Model Diagnostics"
+format:
+  html:
+    toc: true
+    embed-resources: true
+    # grid:
+    #   sidebar-width: 0px
+    #   body-width: 2000px
+    #   margin-width: 0px
+    #   gutter-width: 1.5rem
+editor: source
+
+execute: 
+  # echo: false
+  warning: false
+  message: false
+---
+
+
+```{r, load packages}
+#| echo: true
+pacman::p_load(here,         # For managing directory paths
+               magrittr,     # For the assignment pipe operator %<>%
+               tidyverse,    # For data manipulation tools
+               install = FALSE)
+```
+
+```{r, load data}
+# Set the project root
+proj_root <- "D:/PATHWEIGH/"
+
+# Set the data delivery date to the appropriate data set
+delivery <- 20240326
+
+# Load pp model data
+load(str_c(proj_root, "delivery_", delivery, "/data/pp_mod_data_", delivery, ".Rdata"))
+```
+
+```{r}
+# Create binary variables
+pp_mod_data %<>% 
+  mutate(age_lt_45 = ifelse(Age_cat == "<=45", 1, 0),
+         age_45_to_60 = ifelse(Age_cat == "45-60", 1, 0),
+         age_gt_60 = ifelse(Age_cat == ">60", 1, 0),
+         sex_m = ifelse(Sex == "Male", 1, 0),
+         sex_f = ifelse(Sex == "Female", 1, 0),
+         reth_nhw = ifelse(Race_Ethnicity == "Non-Hispanic White", 1, 0),
+         reth_his = ifelse(Race_Ethnicity == "Hispanic or Latino", 1, 0),
+         reth_blk = ifelse(Race_Ethnicity == "Black or African American", 1, 0),
+         reth_asn = ifelse(Race_Ethnicity == "Asian", 1, 0),
+         reth_oth = ifelse(Race_Ethnicity == "Other", 1, 0),
+         reth_ukn = ifelse(Race_Ethnicity == "Unknown", 1, 0),
+         year_at_ind0 = ifelse(Year_at_ind == "Year0", 1, 0),
+         year_at_ind1 = ifelse(Year_at_ind == "Year1", 1, 0),
+         year_at_ind2 = ifelse(Year_at_ind == "Year2", 1, 0),
+         year_at_ind3 = ifelse(Year_at_ind == "Year3", 1, 0))
+```
+
+```{r}
+# Redefine slope 1, slope 2, slope 3
+pp_mod_data %<>%
+  mutate(slope1 = ifelse(Intervention == "Control", 1, 0),
+         slope2 = ifelse(Intervention == "Control", 0, 1),
+         )
+```
+
+```{r}
+# Linear mixed model with binary variables
+lmer_mod_bin <- lmerTest::lmer(Weight_dv ~ 
+                   
+          # age
+          age_45_to_60 + age_gt_60 + 
+           
+          # sex
+          sex_m + 
+          
+          # race ethnicity
+          reth_his + reth_blk + reth_asn + reth_oth + reth_ukn + 
+           
+          # year at index
+          year_at_ind1 + year_at_ind2 + year_at_ind3 + 
+           
+          # Weight at baseline
+          Weight_bl + slope1 +
+             
+          # Slope1 is the indicator for control
+          slope1:N_days_post_id + slope1:N_days_post_180 + 
+          
+          # Slope2 is the indicator for intervention
+          slope2:N_days_post_id + slope2:N_days_post_180 + 
+          
+          
+          # Clustering, convergence issues with both dept and personid   
+          # (1| DepartmentExternalName) + (1| Arb_PersonId),
+          (1| Arb_PersonId),
+                
+          # Input data frame
+          data=pp_mod_data
+          )
+```
+
+
+```{r}
+# Display model output
+# Unadjusted for N_months_post_id
+broom.mixed::tidy(lmer_mod_bin, conf.int = T) %>%
+  knitr::kable()
+```
+
+### Plots of N_months_post_id vs Avg_Weight in each month after index for each decile group defined by baseline weight
+
+```{r}
+# Calculate predicted values from observed values
+predicted <- predict(lmer_mod_bin, pp_mod_data, re.form=NULL, type="response")
+
+obs_pred <- bind_cols(pp_mod_data, data.frame(predicted)) %>%
+  mutate(observed = Weight_dv)
+```
+
+```{r}
+# Create decile categorical variable
+obs_pred %<>%
+  mutate(decile = ntile(Weight_bl, 10))
+```
+
+```{r}
+# purrr through each decile
+seq(1,10) %>%
+  purrr::map(
+    ~obs_pred %>%
+      filter(decile == .x,
+             Intervention == "Control") %>%
+      select(Arb_PersonId, N_months_post_id, observed, predicted) %>%
+      group_by(N_months_post_id) %>%
+      summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
+      pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
+      ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type, )) +
+      geom_line() +
+      labs(title = str_c("Decile = ", .x)) +
+      theme_minimal()
+  )
+
+
+```
+
+```{r}
+#| echo: false
+#| eval: false
+# purrr map
+seq(1,10) %>%
+  purrr::map(
+    ~obs_pred %>%
+      filter(decile == .x,
+             Intervention == "Control") %>%
+      select(Arb_PersonId, N_days_post_id, observed, predicted) %>%
+      pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Weight_kgs") %>%
+      ggplot(., aes(x = N_days_post_id, y = Weight_kgs, color = Type, )) +
+      geom_line() +
+      labs(title = str_c("Decile = ", .x)) +
+      theme_minimal()
+  )
+```
+
+### Residuals vs predicted values
+```{r}
+plot_data <- 
+  broom::augment(lmer_mod_bin) %>%
+  filter(slope1 == 1) %>% # Filter control phase rows
+  select(.resid, .fitted) 
+
+plot_data %>%
+  ggplot(., aes(x = .fitted, y = .resid)) +
+  geom_point(alpha = 0.2) +
+  theme_minimal()
+```
+

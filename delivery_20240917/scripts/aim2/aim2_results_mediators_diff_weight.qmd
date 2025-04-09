@@ -12,7 +12,8 @@ execute:
 ```{r}
 # *****************************************************************************
 # Carlos Rodriguez, PhD. CU Anschutz Dept. of Family Medicine.
-# aim2_results_mediators
+# aim2_results_mediators where the outcome is the difference between the base
+# line weight and the observed weight, and without the Weight_bl as a covariate
 
 # The purpose of this script is to display the output from a series of
 # mediation models for PATHWEIGH AIM 2.
@@ -145,23 +146,26 @@ mod_data %<>%
 ```
 
 ```{r}
-# mediators <- 
-#   c(
-#     "Any_ref",
-#     # "BariatricSurgery", # resulted in glm.fit: fitted probabilities numerically 0 or 1 occurred only 645 with surgery
-#     "Meds_AOM",
-#     "Meds_Gain",
-#     "Meds_Loss",
-#     "Engagement",
-#     # "Cohort3", # Should not be a mediator, the intervention has to change it some way
-#     "n_follow_up",
-#     # "composite_mediator" # based off of cohort
-#     )
+# Create a variable where the dv is the difference between baseline and the observed value
+mod_data %<>%
+  mutate(Weight_dv = Weight_kgs - Weight_bl)
+```
 
+```{r}
 mediators <- 
-  c("n_wpvs"
-  #  "n_pw_visits" # algorithm did not converge
-   )
+  c(
+    "Any_ref",
+    # "BariatricSurgery", # resulted in glm.fit: fitted probabilities numerically 0 or 1 occurred only 645 with surgery
+    "Meds_AOM",
+    "Meds_Gain",
+    "Meds_Loss",
+    "Engagement",
+    # "Cohort3", # Should not be a mediator, the intervention has to change it some way
+    "n_follow_up",
+    "composite_mediator", # based off of cohort
+    "n_wpvs"
+    # "n_pw_visits" # model did not converge
+    )
 ```
 
 ## Original Mediator Models
@@ -170,7 +174,7 @@ mediators <-
 # PART 1: Do the IVs predict the mediator
 med_mod <- glm(
 
-  [MEDIATOR] ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control +
+  [MEDIATOR] ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Control +
 
   N_months_post_id_con + N_months_post_180_con + 
     
@@ -187,7 +191,7 @@ med_mod <- glm(
 # PART 2: Model the outcome adjusting for the mediator
 out_mod <-  lm(
 
-  Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control +
+  Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Control +
 
   [MEDIATOR] + 
 
@@ -299,7 +303,7 @@ for (i in 1:length(mediators)) {
   
   # PART 1: Do the IVs predict the mediator
   part1_formula <- as.formula(str_c(mediator, 
-  " ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control + N_months_post_id_int + N_months_post_180_int + N_months_post_id_con + N_months_post_180_con"))
+  " ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Control + N_months_post_id_int + N_months_post_180_int + N_months_post_id_con + N_months_post_180_con"))
 
   # Determine if the mediator is binary 
   distinct_vals <- mod_data %>% 
@@ -307,7 +311,7 @@ for (i in 1:length(mediators)) {
     n_distinct()
 
 
-  # If the mediator is binary use glm(), otherwise use lm()
+  # If the mediator is binary use binomial, otherwise use poisson
   if (distinct_vals == 2) {
     med_mod <- glm(part1_formula, data = mod_data, family = binomial)
   } else if (mediator %in% c("Engagement", "n_wpvs", "n_pw_visits")) {
@@ -324,7 +328,7 @@ for (i in 1:length(mediators)) {
 
   cat("### ", mediator, "Part2: Outcome Model", "\n\n")
   # PART 2: Model the outcome adjusting for the mediator
-  part2_formula <- as.formula(str_c("Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Control + ", mediator, " + N_months_post_id_int + N_months_post_180_int + N_months_post_id_con + N_months_post_180_con"))
+  part2_formula <- as.formula(str_c("Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Control + ", mediator, " + N_months_post_id_int + N_months_post_180_int + N_months_post_id_con + N_months_post_180_con"))
 
   out_mod <-  lm(part2_formula, data = mod_data)
 

@@ -1,0 +1,152 @@
+---
+title: "Aim 3: EE vs ENE"
+format:
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+    toc: true
+
+# format:
+#   html:
+#     toc: true
+#     embed-resources: true
+
+execute: 
+  echo: false
+---
+
+```{r}
+# Load libraries
+library(magrittr, include = "%<>%")
+pacman::p_load(tidyverse,
+               gtsummary,
+               here,
+               furrr,
+               openxlsx,
+               geepack)
+```
+
+```{r}
+# Load data
+# Set Cystatin C column to for importing as double, otherwise there may be too
+# many NAs in the first x rows where read_csv() decides what column to assign.
+# It may then assign first as logical, but then encounters a problem when it
+# finally encounters a numeric value.
+data <- read_csv("D:\\PATHWEIGH\\delivery_20240917\\data\\aim3_its_data_20240917.csv",
+                 col_types = cols(`Cystatin C` = col_double()))
+```
+
+```{r, eval = FALSE}
+# Check that the ENE group has all 0s in the N_days_post_WPV
+data %>%
+  filter(EE == 0) %>%
+  pull(N_days_post_wpv) %>%
+  table()
+```
+
+```{r, eval = FALSE}
+# Check that the EE group, for visits before the EnrollmentDate (WPV) all
+# values should be 0 for N_days_post_wpv
+data %>%
+  filter(EE == 1) %>%
+  filter(EncounterDate <= EnrollmentDate) %>%
+  pull(N_days_post_wpv) %>%
+  table()
+
+data %>%
+  filter(EE == 1) %>%
+  filter(EncounterDate == EnrollmentDate) %>%
+  pull(N_days_post_wpv) %>%
+  table()
+```
+
+# Model 1
+```{r}
+# Outcome binary indicator, one per patient per phase
+h1_data <- 
+  data %>%
+  group_by(Arb_PersonId, Intervention) %>%
+  slice_head() %>%
+  ungroup()
+
+# Convert Arb_PersonId to factor
+h1_data %<>%
+  mutate(Arb_PersonId = factor(Arb_PersonId)) %>%
+  mutate(Age_cat = relevel(factor(Age_cat), ref = "<=45")) %>%
+  mutate(Race_Ethnicity = relevel(factor(Race_Ethnicity), ref = "Non-Hispanic White"))
+```
+
+```{r}
+#| echo: true
+h1_mod <- geeglm(
+    EE ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Intervention,
+    family = "binomial",
+    id = Arb_PersonId, 
+    data = h1_data)
+```
+
+```{r}
+tbl_regression(h1_mod, exponentiate = TRUE) %>%
+  as_gt()
+```
+
+# Model 2
+```{r}
+# Remove the index visits since they contain the baseline weight value
+h2_data <- 
+  data %>%
+  filter(IndexVisit == 0)
+
+h2_data %<>%
+  mutate(Arb_PersonId = factor(Arb_PersonId)) %>%
+  mutate(Age_cat = relevel(factor(Age_cat), ref = "<=45")) %>%
+  mutate(Race_Ethnicity = relevel(factor(Race_Ethnicity), ref = "Non-Hispanic White"))
+```
+
+```{r}
+#| echo: true
+h2_mod <- lmerTest::lmer(Weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl +
+
+          N_days_post_id + N_days_post_wpv_con + N_days_post_wpv_int + N_days_post_pw + 
+          
+          N_days_post_1st_visit_int + Intervention +
+
+          (1| Arb_PersonId),
+
+          # Input data frame
+          data = h2_data
+          )
+```
+
+```{r}
+tbl_regression(h2_mod,
+    estimate_fun = purrr::partial(style_ratio, digits = 6)) %>%
+  as_gt()
+```
+
+# Model 3 log(Weight_dv) as dependent variable
+```{r}
+h2_data %<>%
+  mutate(log_weight_dv = log(Weight_dv))
+```
+
+
+```{r}
+#| echo: true
+h2_log_mod <- lmerTest::lmer(log_weight_dv ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl +
+
+          N_days_post_id + N_days_post_wpv_con + N_days_post_wpv_int + N_days_post_pw + 
+          
+          N_days_post_1st_visit_int + Intervention +
+
+          (1| Arb_PersonId),
+
+          # Input data frame
+          data = h2_data
+          )
+```
+
+```{r}
+tbl_regression(h2_log_mod,
+  estimate_fun = purrr::partial(style_ratio, digits = 6)) %>%
+  as_gt()
+```

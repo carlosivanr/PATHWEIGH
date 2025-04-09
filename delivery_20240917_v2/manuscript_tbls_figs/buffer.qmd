@@ -1,0 +1,81 @@
+---
+title: "Untitled"
+format: html
+editor: visual
+---
+
+```{r}
+# predict function for bootstrapping
+predfn <- function(.) {
+  predict(., newdata=new, re.form=NA)
+}
+
+# summarise output of bootstrapping
+sumBoot <- function(merBoot) {
+  return(
+    data.frame(fit = apply(merBoot$t, 2, function(x) as.numeric(quantile(x, probs=.5, na.rm=TRUE))),
+               lwr = apply(merBoot$t, 2, function(x) as.numeric(quantile(x, probs=.025, na.rm=TRUE))),
+               upr = apply(merBoot$t, 2, function(x) as.numeric(quantile(x, probs=.975, na.rm=TRUE)))
+    )
+  )
+}
+
+# 'new' data because predfn requires the input to be named "new"
+new <- overlay_data
+tictoc::tic()
+boot <- lme4::bootMer(lmer_mod_bin, predfn, nsim=10, use.u=TRUE, type="parametric")
+tictoc::toc()
+sumBoot(boot)
+```
+
+```{r}
+# organize overlay data into 4 columns
+# Intervention
+# N-Months_post_id
+# Type
+# Avg_Weight_kgs
+overlay_data %>%
+  select(N_days_post_id, predicted, lwr, upr, slope1) %>%
+  pivot_longer(cols = predicted:upr, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
+  rename(N_months_post_id = N_days_post_id) %>%
+  mutate(Intervention = ifelse(slope1 == 1, "Control", "Intervention")) %>%
+  mutate(N_months_post_id = ifelse(N_months_post_id == 180, 6, 
+                                   ifelse(N_months_post_id == 540, 18, 0))) %>%
+  select(Intervention, N_months_post_id, Type, Avg_Weight_kgs)
+```
+
+```{r}
+overlay_data %>%
+  # filter(Intervention == "Control") %>%
+  group_by(Intervention, N_months_post_id) %>%
+  pivot_wider(names_from = Type, values_from = Avg_Weight_kgs) %>%
+  ggplot(., aes(x = N_months_post_id, y = fit)) +
+  geom_line(aes(N_months_post_id, fit)) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.3, show.legend = FALSE) +
+  facet_grid(~Intervention)
+  
+```
+
+```{r}
+wide <- obs_pred  %>%
+  group_by(Intervention, N_months_post_id) %>%
+  summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
+  select(-predicted) %>%
+  bind_rows(., (overlay_data %>%
+                  group_by(Intervention, N_months_post_id) %>%
+                  pivot_wider(names_from = Type, values_from = Avg_Weight_kgs))) 
+
+ribbon <- 
+  wide %>%
+  select(-observed) %>%
+  drop_na()
+
+wide %>%
+  select(-(fit:upr)) %>%
+  drop_na() %>%
+  ggplot(., aes(x = N_months_post_id, y = observed)) +
+  # geom_line(aes(N_months_post_id, observed), color = "blue") +
+  geom_line(aes(N_months_post_id, observed)) + 
+  # geom_ribbon(data = ribbon, aes(ymin = lwr, ymax = upr), alpha = 0.3, show.legend = FALSE ) +
+  facet_wrap(~Intervention)
+```

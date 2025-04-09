@@ -776,6 +776,34 @@
       ],
       "Hash": "54ed3ea01b11e81a86544faaecfef8e2"
     },
+    "emmeans": {
+      "Package": "emmeans",
+      "Version": "1.10.7",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "estimability",
+        "graphics",
+        "methods",
+        "mvtnorm",
+        "numDeriv",
+        "stats",
+        "utils"
+      ],
+      "Hash": "b4c05dd060e42dd18d722e16d8cf7ec4"
+    },
+    "estimability": {
+      "Package": "estimability",
+      "Version": "1.5.1",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "stats"
+      ],
+      "Hash": "21ec52af13afbcab1cb317567b639b0a"
+    },
     "evaluate": {
       "Package": "evaluate",
       "Version": "0.24.0",
@@ -909,6 +937,19 @@
         "utils"
       ],
       "Hash": "550170303dbb19d07b2bcc288068e7dc"
+    },
+    "forestplot": {
+      "Package": "forestplot",
+      "Version": "3.1.6",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "abind",
+        "checkmate",
+        "grid"
+      ],
+      "Hash": "848afc7e222f2eee8267711bf142913e"
     },
     "fs": {
       "Package": "fs",

@@ -1,0 +1,394 @@
+---
+title: "NAPCRG 2024 Slide Figure"
+format: pptx
+  # docx:
+    # reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+
+params:
+  delivery: "20240917"
+
+execute: 
+  echo: false
+---
+
+```{r}
+# This document is used to fabricate data and generate a plot that shows the
+# way the weight data is analyzed for the 2024 NAPCRG meeting.
+```
+```{r, warning=FALSE, message=FALSE}
+invisible(library(tidyverse))
+library(gtsummary)
+library(magrittr, include.only = "%<>%")
+```
+
+```{r, table formatting functions}
+# Declare model output and table formatting functions
+
+# Part 1
+prep_mdl_out <- function(model_output) {
+  # Set a vector for term labels of the binary variables that were not included in
+  # the model because its not necessary to include sex_f and sex_m in the formula.
+  # These terms are added for completeness when building the final output table
+  # and are used to create an ordered vector of terms for displaying the table.
+  term <- c("age_lt_45",
+    "sex_f",
+    "reth_nhw",
+    "year_at_ind0")
+  
+  model_terms <- model_output %>% pull(term)
+  
+  # Set the order of the terms to organize them in a subsequent table
+  ordered_terms <- c(
+    model_terms[1],
+    term[1],
+    model_terms[2:3],
+    term[2],
+    model_terms[4],
+    term[3],
+    model_terms[5:9],
+    term[4],
+    model_terms[10:18]
+  )
+  
+  # Create the main table
+  # stack the vector terms with model_output
+  tab <- 
+    bind_rows(model_output,
+              (data.frame(term) %>%
+               mutate(effect = "fixed"))
+              ) %>%
+  
+    # Arrange the terms in the previous step to the pre-specified orer
+    arrange((factor(term, levels = ordered_terms))) %>%
+  
+    # remove columns that are not needed for display
+    select(-effect, -statistic, -df) %>%
+  
+    # remove rows that are not needed for display
+    # filter(!term %in% c("sd__(Intercept)", "sd__Observation")) %>%
+  
+    # convert the estimate for N_days_* to N_months_*
+    mutate(estimate = ifelse(grepl("N_days_post", term), estimate * 30, estimate)) %>%
+    mutate(std.error = ifelse(grepl("N_days_post", term), std.error * 30, std.error)) %>%
+    mutate(conf.low = ifelse(grepl("N_days_post", term), conf.low * 30, conf.low)) %>%
+    mutate(conf.high = ifelse(grepl("N_days_post", term), conf.high * 30, conf.high)) %>%
+  
+    # round values
+    mutate(across(estimate:conf.high, ~round(., 3))) %>%
+  
+    # convert term N_days_* to N_months_* and slope* to human readable
+    mutate(term = str_replace(term, "N_days_post_id", "N_months_post_id"),
+           term = str_replace(term, "N_days_post_180", "N_months_post_180"),
+           # term = str_replace(term, "slope1", "Control"),
+           # term = str_replace(term, "slope2", "Intervention")
+           ) %>%
+  
+    # relabel all of the values in the "term" column
+    mutate(term = case_when(
+      term == "age_lt_45" ~ "<45",
+      term == "age_45_to_60" ~ "[45, 60)",
+      term == "age_gt_60" ~ ">60",
+      term == "sex_f" ~ "Female",
+      term == "sex_m" ~ "Male",
+      term == "reth_nhw" ~ "NonHispanicWhite",
+      term == "reth_his" ~ "Hispanic",
+      term == "reth_blk" ~ "Black",
+      term == "reth_asn" ~ "Asian",
+      term == "reth_oth" ~ "Other",
+      term == "reth_ukn" ~ "Unknown",
+      term == "year_at_ind0" ~ "0",
+      term == "year_at_ind1" ~ "1",
+      term == "year_at_ind2" ~ "2",
+      term == "year_at_ind3" ~ "3",
+      term == "Weight_bl" ~ "Weight_bl (kg)",
+      .default = term))
+    
+  return(tab)
+    
+}
+
+# Part 2
+# Manually change slope terms for plotting
+# Not done through a function, but is an important step
+
+# Part 3
+fmt_tab <- function(tab, title) {
+  # Add grouping rows for the following terms
+  tab %>%
+  mutate(across(estimate:std.error, ~ as.character(.))) %>%
+  mutate(across(p.value, ~sprintf("%.3f", .))) %>% # Converting to character, but preserve the trailing zeros
+  gt::gt(rowname_col = "term") %>%
+  gt::rows_add(
+    term = "Age",
+    estimate = "",
+    std.error = "",
+    p.value = "    ",
+    .after = "(Intercept)"
+  ) %>%
+  gt::rows_add(
+    term = "Gender",
+    estimate = "",
+    std.error = "",
+    p.value = "",
+    .before = "Female") %>%
+  gt::rows_add(
+    term = "Race/Ethnicity",
+    estimate = "",
+    std.error = "",
+    p.value = "",
+    .after = "Male") %>%
+  gt::rows_add(
+    term = "Year at Index",
+    estimate = "",
+    std.error = "",
+    p.value = "",
+    .before = "0") %>%
+  gt::tab_header(
+    title = title,
+    # subtitle = "subtitle place holder"
+  )
+}
+```
+
+```{r}  
+# Set the project root
+proj_root <- "D:/PATHWEIGH/"
+
+# Set the data delivery date to the appropriate data set
+delivery <- params$delivery
+
+# Load pp_data for creating tables
+load(str_c(proj_root, "delivery_", delivery, "/data/pp_data_", delivery, ".Rdata"))
+
+# Load visits_post_id
+load(str_c(proj_root, "delivery_", delivery, "/data/visits_post_id_", delivery, ".Rdata"))
+
+# Load pp_mod_data for modeling
+load(str_c(proj_root, "delivery_", delivery, "/data/pp_mod_data_", delivery, ".Rdata"))
+
+# Save a copy as data so that it can be used as an input to other code chunks
+data <- pp_data
+
+# Load comorbidity names for tables
+comorbidity_names <- readRDS(str_c(proj_root, "delivery_", delivery, "/data/comorbidity_names_", delivery, ".RDS"))
+```
+
+```{r}
+# Redefine slope 1 and slope 2 to represent Control and intervention
+pp_mod_data %<>%
+  mutate(slope1 = ifelse(Intervention == "Control", 1, 0),
+         slope2 = ifelse(Intervention == "Intervention", 1, 0)
+         )
+```
+
+
+```{r}
+# Randomly select 1,000 patients
+pp_mod_data_ids <-
+    pp_mod_data %>% 
+    select(Arb_PersonId) %>%
+    distinct()
+
+# Select a sample of 1,000 random patient ids
+rand_ids <-
+    sample_n(pp_mod_data_ids, 1000)
+
+# Filter the pp_mod_data frame to the random ids
+pp_mod_data %<>%
+    filter(Arb_PersonId %in% rand_ids$Arb_PersonId)
+
+
+# Add a different random number to control and intervention values
+pp_mod_data %<>%
+    mutate(Weight_dv = ifelse(Intervention == "Control",
+                              (Weight_dv + rnorm(1, mean = 2, sd = 2)),
+                              Weight_dv),
+           Weight_bl = ifelse(Intervention == "Control", 
+                              (Weight_bl + rnorm(1, mean = 2, sd = 2)),
+                              Weight_bl)
+          ) %>%
+    mutate(Weight_dv = ifelse(Intervention == "Intervention",
+                          (Weight_dv - rnorm(1, mean = 2, sd = 2)),
+                          Weight_dv),
+        Weight_bl = ifelse(Intervention == "Intervention", 
+                          (Weight_bl - rnorm(1, mean = 2, sd = 2)),
+                          Weight_bl)
+      )
+
+```
+
+```{r}
+# Create binary variables to be able to create the average visit for prediciton
+pp_mod_data %<>%
+  mutate(age_lt_45 = ifelse(Age_cat == "<=45", 1, 0),
+         age_45_to_60 = ifelse(Age_cat == "45-60", 1, 0),
+         age_gt_60 = ifelse(Age_cat == ">60", 1, 0),
+         sex_m = ifelse(Sex == "Male", 1, 0),
+         sex_f = ifelse(Sex == "Female", 1, 0),
+         reth_nhw = ifelse(Race_Ethnicity == "Non-Hispanic White", 1, 0),
+         reth_his = ifelse(Race_Ethnicity == "Hispanic or Latino", 1, 0),
+         reth_blk = ifelse(Race_Ethnicity == "Black or African American", 1, 0),
+         reth_asn = ifelse(Race_Ethnicity == "Asian", 1, 0),
+         reth_oth = ifelse(Race_Ethnicity == "Other", 1, 0),
+         reth_ukn = ifelse(Race_Ethnicity == "Unknown", 1, 0),
+         year_at_ind0 = ifelse(Year_at_ind == "Year0", 1, 0),
+         year_at_ind1 = ifelse(Year_at_ind == "Year1", 1, 0),
+         year_at_ind2 = ifelse(Year_at_ind == "Year2", 1, 0),
+         year_at_ind3 = ifelse(Year_at_ind == "Year3", 1, 0))
+```
+
+```{r}
+# Linear mixed model with binary variables
+lmer_mod_bin <- lmerTest::lmer(Weight_dv ~
+
+          # age
+          age_45_to_60 + age_gt_60 +
+
+          # sex
+          sex_m +
+
+          # race ethnicity
+          reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+          # year at index
+          year_at_ind1 + year_at_ind2 + year_at_ind3 +
+
+          # Weight at baseline
+          Weight_bl + slope1 +
+
+          # Slope1 is the same as Phase/Intervention group
+          slope1:N_days_post_id + slope1:N_days_post_180 +
+
+          # Slope2 is the opposite
+          slope2:N_days_post_id + slope2:N_days_post_180 +
+
+          # Clustering, convergence issues with both dept and personid
+          # (1| DepartmentExternalName) + (1| Arb_PersonId),
+          (1| Arb_PersonId),
+
+          # Input data frame
+          data = pp_mod_data
+          )
+```
+
+```{r}
+model_output <- broom.mixed::tidy(lmer_mod_bin,
+                                  effects = "fixed",
+                                  conf.int = TRUE
+                                  )
+```
+
+```{r}
+tab <- prep_mdl_out(model_output)
+
+# Clean up the terms containing "slope" since each model will have different
+# meanings for slope 1, or 2, or 3
+tab %<>%
+  mutate(term = str_replace(term, "slope1", "Usual Care"),
+         term = str_replace(term, "slope2", "Intervention"),
+         term = str_replace(term, "NonHispanicWhite", "Non-Hispanic White")
+        )
+```
+
+```{r}
+# Display tab as a gt object after modifying the names of the parameter estimates
+# tab %>%
+#   fmt_tab(., "ITT Model")
+```
+
+```{r}
+# Grab slopes from the output table
+slopes <-
+  tab %>%
+  filter(grepl(":", term)) %>%
+  select(term, estimate)
+
+# Create a wide data frame with the 0-6m slope and 6-18m slope as separate cols
+# estimate refers to 0-6m and post_180 is the 6-18m slope
+slopes <- left_join(
+  # Get the first interaction slope
+  (slopes %>%
+    mutate(group = c("Con", "Con", "Int", "Int")) %>%
+    group_by(group) %>%
+    slice_head() %>%
+    ungroup()),
+    # Get the estimates for 6-18m slope, by summing within interaction group
+  (slopes %>%
+    mutate(group = c("Con", "Con", "Int", "Int")) %>%
+    group_by(group) %>%
+    summarise(post_180_estimate = sum(estimate))),
+  by = "group"
+ ) 
+```
+```{r}
+# Create figure of observed vs predicted values
+predicted <- predict(lmer_mod_bin, pp_mod_data, re.form=NA, type="response")
+
+obs_pred <- bind_cols(pp_mod_data, data.frame(predicted)) %>%
+  mutate(observed = Weight_dv) %>%
+  select(Arb_PersonId, N_months_post_id, observed, predicted, Intervention)
+```
+
+### All panels display predicted values from the ITT model.
+```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
+ylims <- c(100, 120)
+
+pan_a <- obs_pred  %>%
+  group_by(Intervention, N_months_post_id) %>%
+  summarise(across(observed:predicted, ~ mean(.x, rm.na = TRUE)), .groups = "drop") %>%
+  pivot_longer(cols = observed:predicted, names_to = "Type", values_to = "Avg_Weight_kgs") %>%
+  # filter(N_months_post_id < 5, Intervention == "Control") %>%
+  filter(Type == "observed") %>%
+  # ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs, color = Type, )) +
+  ggplot(., aes(x = N_months_post_id, y = Avg_Weight_kgs)) +
+  # geom_point() +
+  geom_line() +
+  facet_wrap(~Intervention) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  ylim(ylims)
+```
+
+```{r}
+# Create the overlay data by averaging across all visits in each phase of the
+# modeling data frame. Represents the non-index/followup visits. Since covariates
+# are time invarying within phase, it's not necessary to capture the index visit
+
+overlay_data <- 
+pp_mod_data %>%
+  select(age_lt_45, age_45_to_60, age_gt_60, sex_m,
+       reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+       year_at_ind1, year_at_ind2, year_at_ind3,
+       Weight_bl, slope1, slope2, Phase,
+       N_days_post_id, N_days_post_180) %>%
+  group_by(Phase) %>%
+  summarise_all(mean, .groups = "drop") %>%
+  slice(rep(1:n(), each = 3)) %>%
+  mutate(N_days_post_id = rep(c(0,180,540), 2)) %>%
+  mutate(N_days_post_180 = rep(c(0,0,360),2))
+
+# Get the predicted values
+predicted <- predict(lmer_mod_bin, overlay_data, re.form = NA, type = "response")
+
+# Create a data frame of the plotting data
+overlay_data <-
+  bind_cols(overlay_data, data.frame(predicted))
+
+# Create a second data frame with the column names matching those required
+# by original plot
+overlay_data %<>%
+  select(N_days_post_id, predicted, slope1) %>%
+  rename(N_months_post_id = N_days_post_id,
+         Avg_Weight_kgs = predicted) %>%
+  mutate(N_months_post_id = rep(c(0, 6, 18),2),
+         Intervention = ifelse(slope1 == 1, "Control", "Intervention"),
+         Type = "predicted") %>%
+  select(Intervention, N_months_post_id, Type, Avg_Weight_kgs)
+```
+
+```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
+pan_a +
+  geom_line(data = overlay_data, color = "blue") +
+    ylab("Average weight (kgs)") +
+  xlab("Months after index visit")
+```

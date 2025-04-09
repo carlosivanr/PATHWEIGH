@@ -1,0 +1,596 @@
+1                                                          The SAS System                              17:32 Monday, January 6, 2025
+
+NOTE: Unable to open SASUSER.REGSTRY. WORK.REGSTRY will be opened instead.
+NOTE: All registry changes will be lost at the end of the session.
+
+WARNING: Unable to copy SASUSER registry to WORK registry. Because of this, you will not see registry customizations during this 
+         session.
+NOTE: Unable to open SASUSER.PROFILE. WORK.PROFILE will be opened instead.
+NOTE: All profile changes will be lost at the end of the session.
+NOTE: Copyright (c) 2023 by SAS Institute Inc., Cary, NC, USA. 
+NOTE: SAS (r) Proprietary Software 9.4 (TS1M8) 
+      Licensed to UNIVERSITY OF COLORADO SYSTEM - SFA - T&R, Site 70082279.
+NOTE: This session is executing on the X64_WIN+PRO  platform.
+
+
+
+NOTE: Analytical products:
+      
+      SAS/STAT 15.3
+      SAS/ETS 15.3
+      SAS/OR 15.3
+      SAS/IML 15.3
+      SAS/QC 15.3
+
+NOTE: Additional host information:
+
+ X64_WIN+PRO WIN 10.0.22631  Workstation
+
+NOTE: SAS initialization used:
+      real time           0.51 seconds
+      cpu time            0.06 seconds
+      
+1          options nonotes nofmterr;
+2          ods select none;
+3          
+4          /* libname PW "C:\Users\bsc-default\Documents\bcs\PathWeigh"; */
+5          libname PW "D:\PATHWEIGH\delivery_20240917\scripts\aim1b\bootstrap_test";
+6          
+7          *read in the CSV data with n=9358*2;
+8          
+9          /*Set the program number for looping */
+10         %let prog_num = 3;
+11         
+12         /* Set the start of the bootstrap iteration to break up the processing */
+13         %let start = 302;
+14         
+15         /* Set the number of bootstrap samples, or the stop */
+16         %let num_bootstrap = 400;
+17         
+18         
+19         /* Set the output templog */
+20         /* proc printto log="templog_&start-&num_bootstrap..log" new;
+21         run; */
+22         
+23         
+24         /* Input dataset name: represents al of the oberved weight values */
+2                                          The SAS System              17:32 Monday, January 6, 2025
+
+25         %let input_dataset = pw.analysis;
+26         
+27         /* Create a copy of the bootstrap samples data set */
+28         data bootstrap_samples&prog_num.;
+29         	set pw.bootstrap_samples;
+30         run;
+31         
+32         /* Output dataset for bootstrap samples */
+33         %let output_dataset = bootstrap_samples&prog_num;
+34         
+35         /* Unique subject identifier variable */
+36         %let id_var = id;
+37         
+38         /* Create a dataset to hold the bootstrapped samples */
+39         data &output_dataset.;
+40             set &input_dataset.;
+41             bootstrap_iter = 0; /* This creates an identical dataset with the same structure as
+41       ! the input */
+42         	newid=.;
+43         run;
+44         
+45         /* Get unique subject IDs */
+46         proc sql;
+47             create table unique_ids as
+48             select distinct &id_var
+49             from &input_dataset.;
+50         quit;
+51         
+52         
+53         %macro bootstrap;
+54             %do i = &start %to &num_bootstrap;
+55                 /* Resample unique subjects with replacement */
+56                 proc surveyselect data=unique_ids
+57                                   out=resampled_ids&i
+58                                   method=urs /* Unrestricted random sampling with replacement */
+59                                   samprate=1
+60                                   outhits; /* Allows duplicate rows for bootstrapping */
+61                 run;
+62         
+63         		data resampled_ids&i;
+64                     set resampled_ids&i;
+65         			newid=_n_; drop numberhits;
+66                 run;        /* Merge resampled subject IDs back with the original data */
+67         
+68                 proc sql;
+69                     create table sample&i as
+70                     select a.*, b.*
+71                     from &input_dataset. as a
+72                     inner join resampled_ids&i as b
+73                     on a.&id_var = b.&id_var;
+74                 quit;
+75         
+76                 /* Add a variable to indicate the bootstrap iteration */
+77                 data sample&i;
+3                                          The SAS System              17:32 Monday, January 6, 2025
+
+78                     set sample&i;
+79                     bootstrap_iter = &i; /* Indicates which bootstrap iteration */
+80                 run;
+81         
+82                 /* Append the bootstrapped sample to the output dataset */
+83                 proc append base=&output_dataset.
+84                              data=sample&i
+85                              force; /* Ensure structure matches even if issues arise */
+86                 run;
+87         
+88                 /* Delete the temporary sample dataset to save space (optional)
+89                 proc datasets lib=work nolist;
+90                     delete sample&i resampled_ids&i;
+91                 quit;*/
+92             %end;
+93         %mend bootstrap;
+94         
+95         /* Execute the macro */
+96         %bootstrap;
+WARNING: Variable ID already exists on file WORK.SAMPLE302.
+WARNING: Variable ID already exists on file WORK.SAMPLE303.
+WARNING: Variable ID already exists on file WORK.SAMPLE304.
+WARNING: Variable ID already exists on file WORK.SAMPLE305.
+WARNING: Variable ID already exists on file WORK.SAMPLE306.
+WARNING: Variable ID already exists on file WORK.SAMPLE307.
+WARNING: Variable ID already exists on file WORK.SAMPLE308.
+WARNING: Variable ID already exists on file WORK.SAMPLE309.
+WARNING: Variable ID already exists on file WORK.SAMPLE310.
+WARNING: Variable ID already exists on file WORK.SAMPLE311.
+WARNING: Variable ID already exists on file WORK.SAMPLE312.
+WARNING: Variable ID already exists on file WORK.SAMPLE313.
+WARNING: Variable ID already exists on file WORK.SAMPLE314.
+WARNING: Variable ID already exists on file WORK.SAMPLE315.
+WARNING: Variable ID already exists on file WORK.SAMPLE316.
+WARNING: Variable ID already exists on file WORK.SAMPLE317.
+WARNING: Variable ID already exists on file WORK.SAMPLE318.
+WARNING: Variable ID already exists on file WORK.SAMPLE319.
+WARNING: Variable ID already exists on file WORK.SAMPLE320.
+WARNING: Variable ID already exists on file WORK.SAMPLE321.
+WARNING: Variable ID already exists on file WORK.SAMPLE322.
+WARNING: Variable ID already exists on file WORK.SAMPLE323.
+WARNING: Variable ID already exists on file WORK.SAMPLE324.
+WARNING: Variable ID already exists on file WORK.SAMPLE325.
+WARNING: Variable ID already exists on file WORK.SAMPLE326.
+WARNING: Variable ID already exists on file WORK.SAMPLE327.
+WARNING: Variable ID already exists on file WORK.SAMPLE328.
+WARNING: Variable ID already exists on file WORK.SAMPLE329.
+WARNING: Variable ID already exists on file WORK.SAMPLE330.
+WARNING: Variable ID already exists on file WORK.SAMPLE331.
+WARNING: Variable ID already exists on file WORK.SAMPLE332.
+WARNING: Variable ID already exists on file WORK.SAMPLE333.
+WARNING: Variable ID already exists on file WORK.SAMPLE334.
+WARNING: Variable ID already exists on file WORK.SAMPLE335.
+WARNING: Variable ID already exists on file WORK.SAMPLE336.
+4                                          The SAS System              17:32 Monday, January 6, 2025
+
+WARNING: Variable ID already exists on file WORK.SAMPLE337.
+WARNING: Variable ID already exists on file WORK.SAMPLE338.
+WARNING: Variable ID already exists on file WORK.SAMPLE339.
+WARNING: Variable ID already exists on file WORK.SAMPLE340.
+WARNING: Variable ID already exists on file WORK.SAMPLE341.
+WARNING: Variable ID already exists on file WORK.SAMPLE342.
+WARNING: Variable ID already exists on file WORK.SAMPLE343.
+WARNING: Variable ID already exists on file WORK.SAMPLE344.
+WARNING: Variable ID already exists on file WORK.SAMPLE345.
+WARNING: Variable ID already exists on file WORK.SAMPLE346.
+WARNING: Variable ID already exists on file WORK.SAMPLE347.
+WARNING: Variable ID already exists on file WORK.SAMPLE348.
+WARNING: Variable ID already exists on file WORK.SAMPLE349.
+WARNING: Variable ID already exists on file WORK.SAMPLE350.
+WARNING: Variable ID already exists on file WORK.SAMPLE351.
+WARNING: Variable ID already exists on file WORK.SAMPLE352.
+WARNING: Variable ID already exists on file WORK.SAMPLE353.
+WARNING: Variable ID already exists on file WORK.SAMPLE354.
+WARNING: Variable ID already exists on file WORK.SAMPLE355.
+WARNING: Variable ID already exists on file WORK.SAMPLE356.
+WARNING: Variable ID already exists on file WORK.SAMPLE357.
+WARNING: Variable ID already exists on file WORK.SAMPLE358.
+WARNING: Variable ID already exists on file WORK.SAMPLE359.
+WARNING: Variable ID already exists on file WORK.SAMPLE360.
+WARNING: Variable ID already exists on file WORK.SAMPLE361.
+WARNING: Variable ID already exists on file WORK.SAMPLE362.
+WARNING: Variable ID already exists on file WORK.SAMPLE363.
+WARNING: Variable ID already exists on file WORK.SAMPLE364.
+WARNING: Variable ID already exists on file WORK.SAMPLE365.
+WARNING: Variable ID already exists on file WORK.SAMPLE366.
+WARNING: Variable ID already exists on file WORK.SAMPLE367.
+WARNING: Variable ID already exists on file WORK.SAMPLE368.
+WARNING: Variable ID already exists on file WORK.SAMPLE369.
+WARNING: Variable ID already exists on file WORK.SAMPLE370.
+WARNING: Variable ID already exists on file WORK.SAMPLE371.
+WARNING: Variable ID already exists on file WORK.SAMPLE372.
+WARNING: Variable ID already exists on file WORK.SAMPLE373.
+WARNING: Variable ID already exists on file WORK.SAMPLE374.
+WARNING: Variable ID already exists on file WORK.SAMPLE375.
+WARNING: Variable ID already exists on file WORK.SAMPLE376.
+WARNING: Variable ID already exists on file WORK.SAMPLE377.
+WARNING: Variable ID already exists on file WORK.SAMPLE378.
+WARNING: Variable ID already exists on file WORK.SAMPLE379.
+WARNING: Variable ID already exists on file WORK.SAMPLE380.
+WARNING: Variable ID already exists on file WORK.SAMPLE381.
+WARNING: Variable ID already exists on file WORK.SAMPLE382.
+WARNING: Variable ID already exists on file WORK.SAMPLE383.
+WARNING: Variable ID already exists on file WORK.SAMPLE384.
+WARNING: Variable ID already exists on file WORK.SAMPLE385.
+WARNING: Variable ID already exists on file WORK.SAMPLE386.
+WARNING: Variable ID already exists on file WORK.SAMPLE387.
+WARNING: Variable ID already exists on file WORK.SAMPLE388.
+WARNING: Variable ID already exists on file WORK.SAMPLE389.
+WARNING: Variable ID already exists on file WORK.SAMPLE390.
+5                                          The SAS System              17:32 Monday, January 6, 2025
+
+WARNING: Variable ID already exists on file WORK.SAMPLE391.
+WARNING: Variable ID already exists on file WORK.SAMPLE392.
+WARNING: Variable ID already exists on file WORK.SAMPLE393.
+WARNING: Variable ID already exists on file WORK.SAMPLE394.
+WARNING: Variable ID already exists on file WORK.SAMPLE395.
+WARNING: Variable ID already exists on file WORK.SAMPLE396.
+WARNING: Variable ID already exists on file WORK.SAMPLE397.
+WARNING: Variable ID already exists on file WORK.SAMPLE398.
+WARNING: Variable ID already exists on file WORK.SAMPLE399.
+WARNING: Variable ID already exists on file WORK.SAMPLE400.
+97         
+98         
+99         data pw.bootstrap_samples&prog_num.;
+100        	set bootstrap_samples&prog_num.;
+101        run;
+102        
+103        
+104        
+105        
+106        /* Tabulations of GBD regions and 10-year calendar year periods
+107        proc freq data = pw.analysis;
+108        table intervention;
+109        run;
+110        data pw.analysis; set pw.analysis; rename arb_personID=ID n_months_post_id=month; run;
+111        proc sort data=pw.analysis; by intervention id month; run;
+112        /************* Dividing the combined dataset into sub datasets by GBD super region
+112      ! *************/
+113        %macro imputation;
+114           %do i = &start %to &num_bootstrap;
+115        data intervention;
+116        set pw.bootstrap_samples&prog_num.;
+117        where intervention eq "Interve" & bootstrap_iter = &i;
+118        run;
+119        
+120        data control;
+121        set pw.bootstrap_samples&prog_num.;
+122        where intervention eq "Control" & bootstrap_iter = &i;
+123        run;
+124        
+125        /****************************************************************************************
+125      ! ********************/
+126        /************ Stratified imputation(by phase) using restricted cubic splines
+126      ! *********************/
+127        /****************************************************************************************
+127      ! ********************/
+128        
+129        /*************************************************/
+130        /********** control **********/
+131        /************************************
+132        proc univariate data = control;		
+133        var month;		
+134        output out = temp pctlpre=P_ pctlpts=25,50,75;		
+135        run;	
+136        proc print data = temp; run;*************/
+6                                          The SAS System              17:32 Monday, January 6, 2025
+
+137        proc hpmixed data= control;
+138        class newid; 		
+139        effect spl = spline(month / details naturalcubic basis=tpf(noint)
+139      ! knotmethod=list(1,4,10)); 		
+140        model weight = spl / ddfm=residual solution;		
+141        random int spl/ type=un subject=newid solution; 		
+142        ods output ParameterEstimates=sf_1(keep=effect estimate 		
+143        rename=(estimate=overall));		
+144        ods output solutionr=sr_1(keep=effect spl Subject estimate 		
+145                                     rename=(estimate=ssdev));		
+146        run;
+147        
+148        
+149        *preparing to merge datasets with solutions for fixed and random effects into one dataset
+149      ! ; 		
+150        data sf;		
+151        	set sf_1;	
+152        	splnum=_n_-1;	
+153        	if effect='Intercept' then Param='Intercept';	
+154        	else if effect='spl' then Param=cats(effect,splnum); 	
+155        	drop effect;	
+156        run;		
+157        		
+158        data sr;		
+159        	set sr_1;	
+160        	if effect='Intercept' then Param='Intercept'; 	
+161        	else if effect='spl' then Param=cats(effect,spl);	
+162        	newid = Subject; 	
+163        	drop effect;	
+164        run; 		
+165        		
+166        proc sort data=sf; by Param; run;		
+167        proc sort data=sr; by Param; run;		
+168        		
+169        *merging the datasets and calculating subject specific coefficients; 		
+170        data final;		
+171        merge sf sr;		
+172        by Param;		
+173        sscoeff = overall + ssdev; 		
+174        run; 		
+175        		
+176        proc sort data=final; by newid Param; run; 		
+177        		
+178        *transposing data to put subjects in rows; 		
+179        proc transpose data=final out=splcoeff prefix=_; 		
+180        by newid;		
+181        id Param;		
+182        var sscoeff; 		
+183        run; 		
+184        
+185        data splcoeff_6;
+186        set splcoeff;
+187        
+188        drop _name_;
+7                                          The SAS System              17:32 Monday, January 6, 2025
+
+189        
+190        k_n = 10;		
+191        k_n_1 = 4;		
+192        k_i2_1 = 1;	
+193        k_1 = 1;	
+194        
+195        ga_impute = 6;		
+196        		
+197        u_n = (max((ga_impute - k_n),0))**3;		
+198        u_i2_1 = (max((ga_impute - k_i2_1),0))**3;
+199        u_n_1 = (max((ga_impute - k_n_1),0))**3;		
+200        		
+201        ga_impute_spl2 = (u_i2_1 - u_n_1*(k_n-k_i2_1)/(k_n-k_n_1) +
+201      ! u_n*(k_n_1-k_i2_1)/(k_n-k_n_1))/((k_n-k_1)**2);				
+202        
+203        weight_imputed_6 = round(_Intercept + (_spl1*ga_impute) + (_spl2*ga_impute_spl2), 0.01);
+204        
+205        keep newid weight_imputed_6;
+206        label weight_imputed_6 = "Imputed weight at 6 months after index visit";
+207        run;
+208        
+209        data splcoeff_12;
+210        set splcoeff;
+211        
+212        drop _name_;
+213        
+214        k_n = 10;		
+215        k_n_1 = 4;		
+216        k_i2_1 = 1;	
+217        k_1 = 1;
+218        
+219        ga_impute = 12;	
+220        		
+221        u_n = (max((ga_impute - k_n),0))**3;		
+222        u_i2_1 = (max((ga_impute - k_i2_1),0))**3;
+223        u_n_1 = (max((ga_impute - k_n_1),0))**3;		
+224        		
+225        ga_impute_spl2 = (u_i2_1 - u_n_1*(k_n-k_i2_1)/(k_n-k_n_1) +
+225      ! u_n*(k_n_1-k_i2_1)/(k_n-k_n_1))/((k_n-k_1)**2);		
+226        
+227        weight_imputed_12 = round(_Intercept + (_spl1*ga_impute) + (_spl2*ga_impute_spl2), 0.01);
+228        
+229        keep newid weight_imputed_12;
+230        label weight_imputed_12 = "Imputed weight at 12 months after index visit";
+231        run;	
+232        
+233        data splcoeff_18;
+234        set splcoeff;
+235        
+236        drop _name_;
+237        
+238        k_n = 10;		
+239        k_n_1 = 4;		
+240        k_i2_1 = 1;	
+8                                          The SAS System              17:32 Monday, January 6, 2025
+
+241        k_1 = 1;
+242        
+243        ga_impute = 18;	
+244        		
+245        u_n = (max((ga_impute - k_n),0))**3;		
+246        u_i2_1 = (max((ga_impute - k_i2_1),0))**3;
+247        u_n_1 = (max((ga_impute - k_n_1),0))**3;		
+248        		
+249        ga_impute_spl2 = (u_i2_1 - u_n_1*(k_n-k_i2_1)/(k_n-k_n_1) +
+249      ! u_n*(k_n_1-k_i2_1)/(k_n-k_n_1))/((k_n-k_1)**2);		
+250        
+251        weight_imputed_18 = round(_Intercept + (_spl1*ga_impute) + (_spl2*ga_impute_spl2), 0.01);
+252        
+253        keep newid weight_imputed_18;
+254        label weight_imputed_18 = "Imputed weight at 18 months after index visit";
+255        run;	
+256        
+257        /* Merging the imputed weights */			
+258        proc sort data = splcoeff_6; by newid; run;
+259        proc sort data = splcoeff_12; by newid; run;
+260        proc sort data = splcoeff_18; by newid; run;
+261        data pw.control&i;
+262        merge splcoeff_6 splcoeff_12 splcoeff_18;				
+263        by newid;	
+264        keep newid weight_imputed_6 weight_imputed_12 weight_imputed_18;
+265        run;	
+266        
+267                /* Delete the temporary sample dataset to save space (optional) */
+268                proc datasets lib=work nolist;
+269                    delete sf_1 sr_1 final sf sr splcoeff splcoeff_6 splcoeff_12 splcoeff_18;
+270                quit;
+271        /*************************************************/
+272        /********** intervention **********/
+273        /***********************************
+274        proc univariate data = intervention;		
+275        var month;		
+276        output out = temp pctlpre=P_ pctlpts=25,50,75;		
+277        run;	
+278        proc print data = temp; run;**************/
+279        proc hpmixed data= intervention;
+280        class newid; 		
+281        effect spl = spline(month / details naturalcubic basis=tpf(noint)
+281      ! knotmethod=list(1,5,11)); 		
+282        model weight = spl / ddfm=residual solution;		
+283        random int spl/ type=un subject=newid solution; 		
+284        ods output ParameterEstimates=sf_1(keep=effect estimate 		
+285        rename=(estimate=overall));		
+286        ods output solutionr=sr_1(keep=effect spl Subject estimate 		
+287                                     rename=(estimate=ssdev));		
+288        run;
+289        
+290        
+291        *preparing to merge datasets with solutions for fixed and random effects into one dataset
+291      ! ; 		
+9                                          The SAS System              17:32 Monday, January 6, 2025
+
+292        data sf;		
+293        	set sf_1;	
+294        	splnum=_n_-1;	
+295        	if effect='Intercept' then Param='Intercept';	
+296        	else if effect='spl' then Param=cats(effect,splnum); 	
+297        	drop effect;	
+298        run;		
+299        		
+300        data sr;		
+301        	set sr_1;	
+302        	if effect='Intercept' then Param='Intercept'; 	
+303        	else if effect='spl' then Param=cats(effect,spl);	
+304        	newid = Subject; 	
+305        	drop effect;	
+306        run; 		
+307        		
+308        proc sort data=sf; by Param; run;		
+309        proc sort data=sr; by Param; run;		
+310        		
+311        *merging the datasets and calculating subject specific coefficients; 		
+312        data final;		
+313        merge sf sr;		
+314        by Param;		
+315        sscoeff = overall + ssdev; 		
+316        run; 		
+317        		
+318        proc sort data=final; by newid Param; run; 		
+319        		
+320        *transposing data to put subjects in rows; 		
+321        proc transpose data=final out=splcoeff prefix=_; 		
+322        by newid;		
+323        id Param;		
+324        var sscoeff; 		
+325        run; 		
+326        
+327        data splcoeff_6;
+328        set splcoeff;
+329        
+330        drop _name_;
+331        
+332        k_n = 11;		
+333        k_n_1 = 5;		
+334        k_i2_1 = 1;	
+335        k_1 = 1;	
+336        
+337        ga_impute = 6;		
+338        		
+339        u_n = (max((ga_impute - k_n),0))**3;		
+340        u_i2_1 = (max((ga_impute - k_i2_1),0))**3;
+341        u_n_1 = (max((ga_impute - k_n_1),0))**3;		
+342        		
+343        ga_impute_spl2 = (u_i2_1 - u_n_1*(k_n-k_i2_1)/(k_n-k_n_1) +
+343      ! u_n*(k_n_1-k_i2_1)/(k_n-k_n_1))/((k_n-k_1)**2);				
+344        
+10                                         The SAS System              17:32 Monday, January 6, 2025
+
+345        weight_imputed_6 = round(_Intercept + (_spl1*ga_impute) + (_spl2*ga_impute_spl2), 0.01);
+346        
+347        keep newid weight_imputed_6;
+348        label weight_imputed_6 = "Imputed weight at 6 months after index visit";
+349        run;
+350        
+351        data splcoeff_12;
+352        set splcoeff;
+353        
+354        drop _name_;
+355        
+356        k_n = 11;		
+357        k_n_1 = 5;		
+358        k_i2_1 = 1;	
+359        k_1 = 1;
+360        
+361        ga_impute = 12;	
+362        		
+363        u_n = (max((ga_impute - k_n),0))**3;		
+364        u_i2_1 = (max((ga_impute - k_i2_1),0))**3;
+365        u_n_1 = (max((ga_impute - k_n_1),0))**3;		
+366        		
+367        ga_impute_spl2 = (u_i2_1 - u_n_1*(k_n-k_i2_1)/(k_n-k_n_1) +
+367      ! u_n*(k_n_1-k_i2_1)/(k_n-k_n_1))/((k_n-k_1)**2);		
+368        
+369        weight_imputed_12 = round(_Intercept + (_spl1*ga_impute) + (_spl2*ga_impute_spl2), 0.01);
+370        
+371        keep newid weight_imputed_12;
+372        label weight_imputed_12 = "Imputed weight at 12 months after index visit";
+373        run;	
+374        
+375        data splcoeff_18;
+376        set splcoeff;
+377        
+378        drop _name_;
+379        
+380        k_n = 11;		
+381        k_n_1 = 5;		
+382        k_i2_1 = 1;	
+383        k_1 = 1;
+384        
+385        ga_impute = 18;	
+386        		
+387        u_n = (max((ga_impute - k_n),0))**3;		
+388        u_i2_1 = (max((ga_impute - k_i2_1),0))**3;
+389        u_n_1 = (max((ga_impute - k_n_1),0))**3;		
+390        		
+391        ga_impute_spl2 = (u_i2_1 - u_n_1*(k_n-k_i2_1)/(k_n-k_n_1) +
+391      ! u_n*(k_n_1-k_i2_1)/(k_n-k_n_1))/((k_n-k_1)**2);		
+392        
+393        weight_imputed_18 = round(_Intercept + (_spl1*ga_impute) + (_spl2*ga_impute_spl2), 0.01);
+394        
+395        keep newid weight_imputed_18;
+396        label weight_imputed_18 = "Imputed weight at 18 months after index visit";
+11                                         The SAS System              17:32 Monday, January 6, 2025
+
+397        run;	
+398        
+399        /* Merging the imputed weights */			
+400        proc sort data = splcoeff_6; by newid; run;
+401        proc sort data = splcoeff_12; by newid; run;
+402        proc sort data = splcoeff_18; by newid; run;
+403        data pw.intervention&i;
+404        merge splcoeff_6 splcoeff_12 splcoeff_18;				
+405        by newid;	
+406        keep newid weight_imputed_6 weight_imputed_12 weight_imputed_18;
+407        run;	
+408                /* Delete the temporary sample dataset to save space (optional) */
+409                proc datasets lib=work nolist;
+410                    delete sf_1 sr_1 final sf sr splcoeff splcoeff_6 splcoeff_12 splcoeff_18;
+411                quit;
+412        		proc sort data=control nodupkey; by newid; run;
+413        		data control&i; set pw.control&i; newidextra=substr(newid,7); drop newid; run;
+414        		data control&i; set control&i; newid=newidextra*1; drop newidextra;run;
+415        		proc sort data=control&i; by newid; run;
+416        		data pw.control&i; merge control&i(in=in) control; by newid; if in; run;
+417        
+418        		proc sort data=intervention nodupkey; by newid; run;
+419        		data intervention&i; set pw.intervention&i; newidextra=substr(newid,7); drop newid; run
+419      ! ;
+420        		data intervention&i; set intervention&i; newid=newidextra*1; drop newidextra;run;
+421        		proc sort data=intervention&i; by newid; run;
+422        		data pw.intervention&i; merge intervention&i(in=in) intervention; by newid; if in; run;
+423        
+424            %end;
+425        %mend imputation;
+426        
+427        /* Execute the macro */
+428        %imputation;
+429        

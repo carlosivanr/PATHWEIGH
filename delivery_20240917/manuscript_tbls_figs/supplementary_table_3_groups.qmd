@@ -1,0 +1,195 @@
+---
+title: "PATHWEIGH Aim1a v1: Supplementary Table "
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+
+
+execute: 
+  echo: false
+---
+
+
+```{r}
+invisible(library(tidyverse))
+library(gtsummary)
+library(magrittr, include.only = "%<>%")
+```
+
+
+```{r}
+# Load the ee_ene data set with the redefined index visit
+load("D:\\PATHWEIGH\\delivery_20240917\\data\\ee_ene_20240917.RData")
+
+# Load the pp_data
+load("D:\\PATHWEIGH\\delivery_20240917\\data\\pp_data_20240917.RData")
+```
+
+```{r}
+# Double check the consort values
+ee_ene_consort %>% 
+  filter(Censored == 0) %>%
+  select(Arb_PersonId) %>%
+  distinct() %>%
+  nrow()
+
+ee_ene_consort %>% 
+  filter(EE == 1, Censored == 0) %>%
+  select(Arb_PersonId) %>%
+  distinct() %>%
+  nrow()
+
+```
+
+```{r}
+# Remove the ene patients from the ee_ene data set
+ee <- ee_ene %>% filter(EE == 1)
+
+# Remove the patients in the pp_data from the ee data set
+ee %<>%
+  filter(!Arb_PersonId %in% pp_data$Arb_PersonId)
+
+# Count the number of visits per patient in each phase and arrange them in wide
+# format
+n_visits_per_pt <- 
+  ee %>%
+  drop_na(Weight_kgs) %>%
+  filter(Censored == 0) %>%
+  group_by(Arb_PersonId, Intervention.factor) %>%
+  count() %>%
+  ungroup() %>%
+  pivot_wider(names_from = Intervention.factor, values_from = n) %>%
+  mutate(across(Control:Intervention, ~ifelse(is.na(.x), 0, .x)))
+
+# Get the patients that have two or more visits in control
+con_pts <- 
+  n_visits_per_pt %>%
+  filter(Control >= 2) %>%
+  pull(Arb_PersonId)
+
+# Get the patients that have two or more visits in intervention
+int_pts <- 
+  n_visits_per_pt %>%
+  filter(Intervention >= 2) %>%
+  pull(Arb_PersonId)
+
+# Create two subsets to later on stack
+con_visits <- 
+  ee %>%
+  filter(Intervention.factor == "Control", Arb_PersonId %in% con_pts) %>%
+  mutate(sub_group = "2+ Con" )
+ 
+int_visits <- 
+  ee %>%
+  filter(Intervention.factor == "Intervention", Arb_PersonId %in% int_pts) %>%
+  mutate(sub_group = "2+ Int")
+
+
+# Create the sub_group variable in pp_data
+both_visits <- 
+  ee_ene %>% 
+  filter(Arb_EncounterId %in% pp_data$Arb_EncounterId) %>%
+  mutate(sub_group = "2+ Both")
+
+
+# Stack all the sub data sets together for a table
+# Note, for those with visits in both phases, only the control 
+# is shown
+data <- 
+  bind_rows(con_visits, int_visits, (both_visits %>% filter(IndexVisit == 1, Intervention.factor == "Control")) )
+```
+
+
+```{r}
+sub_tab1 <- 
+data %>%
+  filter(IndexVisit == 1) %>%
+  mutate(across(PHQ2:GAD7, ~ as.numeric(.)),
+         EOSS = fct_na_value_to_level(factor(EOSS, levels = c("0", "1", "2", "3")), level = "Unknown")) %>%
+  mutate(Smoking_Status = fct_na_value_to_level(Smoking_Status, level = "Unknown")) %>%
+  mutate(PHQ2_complete = ifelse(is.na(PHQ2), 0, 1),
+         PHQ2_gt_0 = ifelse(PHQ2 > 0, 1, 0),
+         PHQ9_complete = ifelse(is.na(PHQ9), 0, 1),
+         GAD7_complete = ifelse(is.na(GAD7), 0, 1)) %>%
+  select(Age, Sex, Race_Ethnicity, Insurance, Weight_kgs, BMI,
+         Systolic_blood_pressure, Diastolic_blood_pressure,
+         A1C:TSH, -`Cystatin C`, EOSS,
+         PHQ2, PHQ2_complete, PHQ2_gt_0, PHQ9, PHQ9_complete, GAD7, GAD7_complete, Smoking_Status,
+         sub_group) %>%
+  tbl_summary(by = sub_group,
+              missing = "ifany",
+              type = list(c(PHQ2, PHQ9, GAD7) ~ 'continuous'),
+
+              # Temporarily modify statistic to show min and max to check data ranges
+              # are reasonable
+              # statistic = list(all_continuous() ~ c("{mean} ({sd}; {min}; {max})")),
+
+              statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+              label = list(Age ~ "Age (years)",
+              Weight_kgs ~ "Weight (kg)",
+              Race_Ethnicity ~ "Race/Ethnicity",
+              BMI ~ "BMI (kg/m\U00B2)", # U00B2 will display meters squared
+              Systolic_blood_pressure ~ "Systolic BP (mmHg)",
+              Diastolic_blood_pressure ~ "Diastolic BP (mmHg)",
+              Smoking_Status ~ "Smoking Status"),
+              digits = list(all_categorical() ~ c(0,1),
+                            all_continuous() ~ c(1,1))
+  )
+
+```
+
+
+```{r}
+pw_pts <- 
+  both_visits %>%
+  filter(WPV_PW_flow == 1 | WPV_WMQ == 1 | WPV_smart == 1 | WPV_IP == 1 | WPV_TH ==1) %>%
+  distinct(Arb_PersonId) %>%
+  pull(Arb_PersonId)
+
+```
+
+```{r}
+sub_tab2 <- 
+data %>%
+  filter(Arb_PersonId %in% pw_pts) %>%
+  mutate(across(PHQ2:GAD7, ~ as.numeric(.)),
+         EOSS = fct_na_value_to_level(factor(EOSS, levels = c("0", "1", "2", "3")), level = "Unknown")) %>%
+  mutate(Smoking_Status = fct_na_value_to_level(Smoking_Status, level = "Unknown")) %>%
+  mutate(PHQ2_complete = ifelse(is.na(PHQ2), 0, 1),
+         PHQ2_gt_0 = ifelse(PHQ2 > 0, 1, 0),
+         PHQ9_complete = ifelse(is.na(PHQ9), 0, 1),
+         GAD7_complete = ifelse(is.na(GAD7), 0, 1)) %>%
+  select(Age, Sex, Race_Ethnicity, Insurance, Weight_kgs, BMI,
+         Systolic_blood_pressure, Diastolic_blood_pressure,
+         A1C:TSH, -`Cystatin C`, EOSS,
+         PHQ2, PHQ2_complete, PHQ2_gt_0, PHQ9, PHQ9_complete, GAD7, GAD7_complete, Smoking_Status
+        ) %>%
+  tbl_summary(
+              missing = "ifany",
+              type = list(c(PHQ2, PHQ9, GAD7) ~ 'continuous'),
+
+              # Temporarily modify statistic to show min and max to check data ranges
+              # are reasonable
+              # statistic = list(all_continuous() ~ c("{mean} ({sd}; {min}; {max})")),
+
+              statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+              label = list(Age ~ "Age (years)",
+              Weight_kgs ~ "Weight (kg)",
+              Race_Ethnicity ~ "Race/Ethnicity",
+              BMI ~ "BMI (kg/m\U00B2)", # U00B2 will display meters squared
+              Systolic_blood_pressure ~ "Systolic BP (mmHg)",
+              Diastolic_blood_pressure ~ "Diastolic BP (mmHg)",
+              Smoking_Status ~ "Smoking Status"),
+              digits = list(all_categorical() ~ c(0,1),
+                            all_continuous() ~ c(1,1))
+  ) %>%
+  modify_header(all_stat_cols() ~ "**2+ Both w PW**  \nN = {n}")
+```
+
+
+```{r}
+# Merge tables
+tbl_merge(
+  tbls = list(sub_tab1, sub_tab2)) %>%
+  modify_spanning_header(all_stat_cols() ~ "**Sub Group**")
+```

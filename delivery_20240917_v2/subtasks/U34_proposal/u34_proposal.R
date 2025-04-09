@@ -1,0 +1,75 @@
+library(tidyverse)
+
+# Load data
+load("D:\\PATHWEIGH\\delivery_20240917\\data\\ee_ene_20240917.RData")
+
+data <- ee_ene
+
+rm(ee_ene)
+
+# Get the provider level percent of pw visits
+provider_percent_pw_visits <- data %>%
+  filter(Intervention.factor == "Intervention") %>%
+  group_by(ProviderNpi) %>%
+  summarise(
+    n_visits = n(),
+    n_pw_visits = sum(WPV >= 1)
+  ) %>%
+  mutate(
+    percent_pw_visits = round(n_pw_visits/n_visits * 100, 2)
+  )
+
+# Merge the provider NPI percentages back to the main data set
+data <- data %>%
+  left_join(
+    .,
+    provider_percent_pw_visits,
+    by = "ProviderNpi"
+  )
+
+data %>%
+  filter(Intervention.factor == "Intervention") %>%
+  select(DepartmentExternalName, ProviderNpi, percent_pw_visits) %>%
+  group_by(DepartmentExternalName) %>% # For each clinic get an average of the percent pw_visits per provider
+  summarise(
+    mean_prov_percent = mean(percent_pw_visits),
+  ) %>% # Get the mean, sd, and IQR
+  summarise(
+    mean = mean(mean_prov_percent),
+    sd = sd(mean_prov_percent),
+    iqr = IQR(mean_prov_percent)
+  )
+
+
+# *****************************************************************************
+
+# # Get the providers who used Pathweigh tools
+# pw_providers <- data %>%
+#   filter(WPV >= 1) %>%
+#   select(ProviderNpi) %>%
+#   distinct()
+
+# # Get the external name and provider npi
+# data <-
+# data %>%
+#   select(DepartmentExternalName, ProviderNpi) %>%
+#   distinct()
+
+# # Create a variable to indicate if a provider was associated with a pw tool
+# data <-
+#   data %>%
+#   mutate(pw_provider = ifelse(ProviderNpi %in% pw_providers$ProviderNpi, 1, 0))
+
+# # Calculate the total number of providers and the percentage that used pw tools
+# data <-
+#   data %>%
+#   group_by(DepartmentExternalName) %>%
+#   summarise(total_providers = n(), pw_providers = sum(pw_provider)) %>%
+#   mutate(percent_pw_providers = round(pw_providers/total_providers * 100, 2))
+
+# # Get the values that Qing needs for the proposal
+# data %>%
+#   summarise(min_per = min(percent_pw_providers),
+#             max_per = max(percent_pw_providers),
+#             mean_per = mean(percent_pw_providers),
+#             sd_per = sd(percent_pw_providers))
