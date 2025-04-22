@@ -65,6 +65,8 @@ mod_data %<>%
   mutate(N_months_post_id = N_days_post_id / 30,
          N_months_post_180 = N_days_post_180 / 30)
 
+
+
 # create 4 new variables for mediation models
 mod_data %<>%
   mutate(N_months_post_id_con = Control * N_months_post_id,

@@ -1,0 +1,708 @@
+---
+title: " Piecewise changing point model"
+date: "`r Sys.Date()`"
+
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+    toc: true
+
+execute: 
+  echo: false
+---
+
+```{r}
+# Changed the lmer model
+# this model does not have the visits inbetween the last visit in control
+# and the first index visit in the intervention pahse
+# For some reason, the year_1 year_2 etc. terms caused model convergence when removed
+# The model predictions appeared in bands and that was in indicator to remove the year terms
+# Will try to implement the same model but on the EE-ENE data using the same patients
+```
+
+```{r, warning=FALSE, message=FALSE}
+invisible(library(tidyverse))
+library(gtsummary)
+library(magrittr, include.only = "%<>%")
+```
+
+```{r}  
+# Set the project root
+proj_root <- "D:/PATHWEIGH/"
+
+# Set the data delivery date to the appropriate data set
+delivery <- "20240917"
+
+# Load pp_data for creating tables
+load(str_c(proj_root, "delivery_", delivery, "/data/pp_data_", delivery, ".Rdata"))
+
+# Load visits_post_id to create a new data set
+load(str_c(proj_root, "delivery_", delivery, "/data/visits_post_id_", delivery, ".Rdata"))
+
+# Load pp_mod_data for merging in variables
+load(str_c(proj_root, "delivery_", delivery, "/data/pp_mod_data_", delivery, ".Rdata"))
+
+# Save a copy as data so that it can be used as an input to other code chunks
+# data <- pp_data
+
+# Load comorbidity names for tables
+# comorbidity_names <- readRDS(str_c(proj_root, "delivery_", delivery, "/data/comorbidity_names_", delivery, ".RDS"))
+```
+
+```{r}
+# data <- 
+#     visits_post_id %>%
+#     filter(Arb_EncounterId %in% pp_data$Arb_EncounterId)
+```
+
+```{r}
+
+# Filter data set to less than or equal to 18 months after the index date
+# Get the patient ids that have 2 or more visit in either phase
+ids <- c("Control", "Intervention") %>%
+  purrr::map(
+    ~ visits_post_id %>%
+      filter(Sex != "Unknown") %>%
+      drop_na(Weight_kgs) %>%
+      filter(Censored == 0) %>%
+      # filter(N_months_post_id <= 18) %>%
+      filter(Intervention.factor == .x) %>%
+      group_by(Arb_PersonId) %>%
+      count() %>%
+      ungroup() %>%
+      filter(n >= 2)
+  )
+
+
+```
+
+
+
+```{r}
+#| eval: false
+
+# Check the sum of the Ids
+sum(ids[[1]]$Arb_PersonId %in% ids[[2]]$Arb_PersonId)
+
+# count the number of rows that this would result in a data frame
+visits_post_id %>%
+  filter(Arb_PersonId %in% ids[[1]]$Arb_PersonId & Arb_PersonId %in% ids[[2]]$Arb_PersonId) %>%
+  filter(IndexDate <= "2024-03-16") %>%
+  drop_na(Weight_kgs) %>%
+  filter(Censored == 0, Sex != "Unknown") %>%
+  nrow()
+
+
+# Are all of the original 9,358 in the 9,485
+sum(
+    (pp_data %>% 
+        select(Arb_PersonId) %>% 
+        distinct() %>% 
+        pull(Arb_PersonId)) %in% 
+    (visits_post_id %>% 
+        filter(Arb_PersonId %in% ids[[1]]$Arb_PersonId & Arb_PersonId %in% ids[[2]]$Arb_PersonId) %>% 
+        select(Arb_PersonId) %>%
+        distinct() %>%
+        pull(Arb_PersonId))
+  )
+
+```
+
+```{r}
+# Create the data set
+data <- visits_post_id %>%
+  filter(Arb_PersonId %in% ids[[1]]$Arb_PersonId & Arb_PersonId %in% ids[[2]]$Arb_PersonId) %>%
+  filter(IndexDate <= "2024-03-16") %>%
+  filter(Arb_PersonId %in% pp_data$Arb_PersonId) %>%
+  drop_na(Weight_kgs) %>%
+  filter(Censored == 0, Sex != "Unknown")
+
+```
+
+
+```{r}
+# Need 4 new columns
+# 1. N_days_post_id
+# 2. N_days_post_id_int
+# 3. N_days_post_wpv
+# 4. Year from EncounterDate
+
+# First make three new index dates
+# IndexDate_con
+# IndexDate_int
+# IndexDate_pw
+
+# Create the index dates for control and intervention in separate columns
+data <- 
+  data %>%
+    mutate(IndexDate_con = if_else(IndexVisit == 1 & Intervention.factor == "Control", IndexDate, NA),
+           IndexDate_int = if_else(IndexVisit == 1 & Intervention.factor == "Intervention", IndexDate, NA))
+
+
+# Create the index dates for those with a PW visit
+index_dates_pw <- 
+data %>%
+  filter(PW_Visit == 1) %>%
+  arrange(EncounterDate) %>%
+  group_by(Arb_PersonId) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(Arb_PersonId, EncounterDate) %>%
+  rename(IndexDate_pw = EncounterDate)
+
+# Merge the index dates to data
+data <- left_join(data, index_dates_pw, by = "Arb_PersonId")
+
+# Fill in the missing values created from the prior steps
+data <- 
+  data %>%
+    group_by(Arb_PersonId) %>%
+    fill(IndexDate_con, IndexDate_int, IndexDate_pw, .direction = "updown") %>%
+    ungroup()
+
+# Ensure that all PW_visit patients have all of their index Dates
+# nrow() should be 0
+n_rows <- data %>%
+  filter(Arb_PersonId %in% index_dates_pw$Arb_PersonId) %>%
+  select(Arb_PersonId, IndexDate_pw) %>%
+  filter(is.na(IndexDate_pw)) %>%
+  nrow()
+
+# Calculate N_days_post_id
+data <- 
+  data %>%
+    mutate(N_days_post_id_con = as.numeric(EncounterDate - IndexDate_con),
+          N_days_post_id_int = as.numeric(EncounterDate - IndexDate_int),
+          N_days_post_id_pw = as.numeric(EncounterDate - IndexDate_pw)) %>%
+    mutate(across(N_days_post_id_con:N_days_post_id_pw, ~ ifelse(.x < 0 | is.na(.x), 0, .x))) %>%
+    arrange(Arb_PersonId, EncounterDate)
+
+
+
+# Create N_months_post_id variables
+data <- 
+  data %>%
+  mutate(N_months_post_id_con = N_days_post_id_con / 30,
+         N_months_post_id_int = N_days_post_id_int / 30,
+         N_months_post_id_pw = N_days_post_id_pw / 30)
+
+# Create a separate variable of N_months_post_id that is not divided by 30 days
+# and is not going to be interrupted in the intervention phase
+data <- 
+  data %>% 
+  mutate(N_months_post_id = round(N_months_post_id_con)) 
+
+```
+
+```{r}
+# Need to makeAge_cat 
+
+# Convert to factor for joining
+data <- 
+  data %>%
+    mutate(Arb_PersonId = factor(Arb_PersonId))
+
+# Merge
+data %<>%
+  mutate(Age_cat = ifelse(Age <= 45, "<=45", NA),
+          Age_cat = ifelse(Age > 45 & Age <= 60, "45-60", Age_cat),
+          Age_cat = ifelse(Age > 60, ">60", Age_cat))
+```
+
+```{r}
+# Create binary variables to be able to create the average visit for prediciton
+data <- 
+  data %>%
+  mutate(age_lt_45 = ifelse(Age_cat == "<=45", 1, 0),
+         age_45_to_60 = ifelse(Age_cat == "45-60", 1, 0),
+         age_gt_60 = ifelse(Age_cat == ">60", 1, 0),
+         sex_m = ifelse(Sex == "Male", 1, 0),
+         sex_f = ifelse(Sex == "Female", 1, 0),
+         reth_nhw = ifelse(Race_Ethnicity == "Non-Hispanic White", 1, 0),
+         reth_his = ifelse(Race_Ethnicity == "Hispanic or Latino", 1, 0),
+         reth_blk = ifelse(Race_Ethnicity == "Black or African American", 1, 0),
+         reth_asn = ifelse(Race_Ethnicity == "Asian", 1, 0),
+         reth_oth = ifelse(Race_Ethnicity == "Other", 1, 0),
+         reth_ukn = ifelse(Race_Ethnicity == "Unknown", 1, 0),
+         year_0 = ifelse(Year == "Year0", 1, 0),
+         year_1 = ifelse(Year == "Year1", 1, 0),
+         year_2 = ifelse(Year == "Year2", 1, 0),
+         year_3 = ifelse(Year == "Year3", 1, 0),
+         year_4 = ifelse(Year == "Year4", 1, 0))
+```
+
+
+```{r}
+#| echo: true
+# Linear mixed model with binary variables
+lmer_mod_bin <- lmerTest::lmer(Weight_kgs ~
+
+          # age
+          age_45_to_60 + age_gt_60 +
+
+          # sex
+          sex_m +
+
+          # race ethnicity
+          reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+          # year
+          year_1 + year_2 + year_3 + year_4 +
+
+            
+          N_months_post_id_con + N_months_post_id_int + 
+            
+          # N_months_post_id_pw +
+
+          (1| DepartmentExternalName) + (1| Arb_PersonId),
+
+          # Input data frame
+          data = data
+          )
+```
+
+
+```{r}
+tbl_regression(lmer_mod_bin, intercept = TRUE) %>%
+    add_glance_table(include = c(nobs, sigma, logLik, AIC, BIC, REMLcrit, df.residual))
+
+```
+
+# Residuals plot
+```{r}
+res <- resid(lmer_mod_bin) 
+plot(fitted(lmer_mod_bin), res) 
+```
+
+```{r}
+
+```
+
+<!-- ## Plot of the average weight from all visits in each month after index -->
+```{r}
+#| eval: false
+#| 
+# Plot of the average observed values by month
+obs_pred %>%
+  group_by(N_months_post_id) %>%
+  summarise(avg_weight_kgs = mean (observed)) %>%
+  ungroup() %>%
+  ggplot(., aes(x = N_months_post_id, y = avg_weight_kgs)) + 
+  geom_point() + 
+  geom_line()
+```
+
+<!-- ## Plot of the average predicted weight from all visits in each month after index -->
+```{r}
+#| eval: false
+#| 
+# Plot of the averaged predictions by month
+obs_pred %>%
+  group_by(N_months_post_id) %>%
+  summarise(avg_weight_kgs = mean (predicted)) %>%
+  ungroup() %>%
+  ggplot(., aes(x = N_months_post_id, y = avg_weight_kgs)) + 
+  geom_point() + 
+  geom_line()
+```
+
+## Overall plot
+```{r, fig.dpi = 600}
+# Create figure of observed vs predicted values
+obs_pred <- 
+  bind_cols(data,
+            (broom.mixed::augment(lmer_mod_bin) %>% select(.fixed, .resid))) %>%
+  mutate(observed = Weight_kgs,
+         predicted = .fixed) %>%
+  select(Arb_PersonId, N_months_post_id, observed, predicted, Intervention.factor, Cohort, GroupID, .resid) %>%
+  mutate(Cohort = GroupID) # Because Cohort is time invariant, assign Group ID to Cohort for time invariant
+
+
+# convert to long
+obs_pred_long <- 
+  obs_pred %>%
+  group_by(Arb_PersonId, N_months_post_id) %>%
+  pivot_longer(., cols = c(observed, predicted), values_to = "Weight", names_to = "Type") %>%
+  ungroup()
+
+# display plot
+obs_pred_long %>%
+  group_by(N_months_post_id, Type) %>% # We could make the average profile and make 18 months 
+  summarise(avg_weight_kgs = mean(Weight), .groups = "drop") %>%
+  filter(N_months_post_id <= 48 ) %>%
+  ggplot(., aes(x = N_months_post_id, y = avg_weight_kgs, color = Type)) +
+  geom_point() +
+  geom_line() + 
+  theme(legend.position="bottom")
+```
+
+```{r}
+# Plot residuals against N_months_post_id
+obs_pred %>%
+  filter(N_months_post_id <= 48 ) %>%
+  ggplot(., aes(x = N_months_post_id, y = .resid)) +
+  geom_point() +
+  # geom_line() + 
+  theme(legend.position="bottom")
+```
+
+```{r}
+obs_pred %>%
+  filter(N_months_post_id <= 48 ) %>%
+  ggplot(., aes(x = N_months_post_id, y = observed)) +
+  geom_point() +
+  # geom_line() + 
+  theme(legend.position="bottom")
+```
+
+```{r}
+obs_pred %>%
+  filter(N_months_post_id <= 48 ) %>%
+  ggplot(., aes(x = N_months_post_id, y = predicted)) +
+  geom_point() +
+  # geom_line() + 
+  theme(legend.position="bottom")
+```
+
+```{r}
+#| eva: false
+
+# Sample 100 random participants
+pt_sample <- sample((data %>% select(Arb_PersonId) %>% distinct() %>% pull(Arb_PersonId)), 6, replace = FALSE)
+
+obs_pred_long %>%
+  filter(Arb_PersonId %in% pt_sample) %>%
+  ggplot(., aes(x = N_months_post_id, y = Weight, color = Type)) +
+  geom_point() +
+  geom_line() + 
+  facet_wrap( ~ Arb_PersonId) +
+  theme(legend.position="bottom")
+```
+
+## Overall by phase
+```{r, fig.height = 8, fig.width=6.5, fig.dpi = 600}
+# Display observed and predicted by phase
+obs_pred_long <- 
+  obs_pred %>%
+  group_by(Arb_PersonId, N_months_post_id, Intervention.factor) %>%
+  pivot_longer(., cols = c(observed, predicted), values_to = "Weight", names_to = "Type") %>%
+  ungroup()
+
+# 
+obs_pred_long %>%
+  group_by(N_months_post_id, Type, Intervention.factor) %>% # We could make the average profile and make 18 months 
+  summarise(avg_weight_kgs = mean(Weight), .groups = "drop") %>%
+  filter(N_months_post_id <= 48 ) %>%
+  ggplot(., aes(x = N_months_post_id, y = avg_weight_kgs, color = Type)) +
+  geom_point() +
+  geom_line() + 
+  theme(legend.position="bottom") +
+  facet_wrap( ~Intervention.factor)
+```
+
+
+## Sum of residuals
+```{r}
+#| echo: true
+broom.mixed::augment(lmer_mod_bin) %>% 
+  select(.resid) %>%
+  summarise(sum_of_residuals = sum(.resid))
+```
+
+
+## Number of observations by month after the initial index visit in control
+```{r}
+data %>%
+  select(N_months_post_id) %>%
+  tbl_summary(type = all_continuous() ~ "categorical")
+```
+
+## Plot of the average weight from all visits in each month after index by cohort
+
+```{r, fig.height = 8, fig.width=6.5, fig.dpi = 600}
+obs_pred_long %>%
+  group_by(N_months_post_id, Type, Cohort) %>%
+  summarise(avg_weight_kgs = mean(Weight), .groups = "drop") %>%
+  filter(N_months_post_id <= 48 ) %>%
+  ggplot(., aes(x = N_months_post_id, y = avg_weight_kgs, color = Type)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap( ~ Cohort) +
+  theme(legend.position="bottom")
+```
+
+## Plot of average weight from all visits by cohort and by phase
+
+### Control
+
+#### Tabulation of the number of control phase visits in each month after index
+- In the control phase, the max N_months_post_id is 36
+
+```{r}
+obs_pred_long %>%
+  # group_by(N_months_post_id, Type, Cohort, Intervention.factor) %>%
+  # summarise(avg_weight_kgs = mean(Weight), .groups = "drop") %>%
+  filter(Type == "observed", Intervention.factor == "Control" ) %>%
+  select(N_months_post_id) %>%
+  mutate(N_months_post_id = factor(N_months_post_id)) %>%
+  tbl_summary()
+```
+
+
+```{r, fig.height = 8, fig.width=6.5, fig.dpi = 600}
+obs_pred_long %>%
+  group_by(N_months_post_id, Type, Cohort, Intervention.factor) %>%
+  summarise(avg_weight_kgs = mean(Weight), .groups = "drop") %>%
+  filter(
+    N_months_post_id <= 48, 
+    Intervention.factor == "Control") %>%
+
+  # Placed here to tabalute
+  # select(N_months_post_id) %>%
+  # mutate(N_months_post_id = factor(N_months_post_id)) %>%
+  # tbl_summary()
+
+  ggplot(., aes(x = N_months_post_id, y = avg_weight_kgs, color = Type)) +
+  geom_point() +
+  geom_line() +
+  facet_grid( ~ Cohort) +
+  theme(legend.position="bottom")
+```
+
+
+
+
+
+### Intervention
+
+#### Tabulation of the number of intervention phase visits in each month after index
+- In the intervention phase, the max N_months_post_id is 55
+
+```{r}
+obs_pred_long %>%
+  # group_by(N_months_post_id, Type, Cohort, Intervention.factor) %>%
+  # summarise(avg_weight_kgs = mean(Weight), .groups = "drop") %>%
+  filter(Type == "observed", Intervention.factor == "Intervention" ) %>%
+  select(N_months_post_id) %>%
+  mutate(N_months_post_id = factor(N_months_post_id)) %>%
+  tbl_summary()
+```
+
+```{r, fig.height = 8, fig.width=6.5, fig.dpi = 600}
+obs_pred_long %>%
+  group_by(N_months_post_id, Type, Cohort, Intervention.factor) %>%
+  summarise(avg_weight_kgs = mean(Weight), .groups = "drop") %>%
+  filter(
+    N_months_post_id <= 48, 
+    Intervention.factor == "Intervention" ) %>%
+  ggplot(., aes(x = N_months_post_id, y = avg_weight_kgs, color = Type)) +
+  geom_point() +
+  geom_line() +
+  facet_grid( ~ Cohort) +
+  theme(legend.position="bottom")
+```
+
+
+## Additional model with N_months_post_id and N_months_post_id_int (in Mark's EE vs ENE nomenclature)
+<!-- - Sample is 9,358 from Aim1 -->
+```{r}
+#| echo: true
+# Linear mixed model with binary variables
+lmer_mod_bin2 <- lmerTest::lmer(Weight_kgs ~
+
+          # age
+          age_45_to_60 + age_gt_60 +
+
+          # sex
+          sex_m +
+
+          # race ethnicity
+          reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+          # year at index
+          year_1 + year_2 + year_3 + year_4 +
+            
+          N_months_post_id_con + N_months_post_id_int +
+
+          (1| DepartmentExternalName) + (1| Arb_PersonId),
+
+          # Input data frame
+          data = data
+          )
+```
+
+
+```{r}
+tbl_regression(lmer_mod_bin2, intercept = TRUE) %>%
+    add_glance_table(include = c(nobs, sigma, logLik, AIC, BIC, REMLcrit, df.residual))
+```
+
+
+```{r}
+# Pt. 1 of 3
+# Create figure of observed vs predicted values
+obs_pred <- 
+  bind_cols(data,
+            (broom.mixed::augment(lmer_mod_bin2) %>% select(.fixed))) %>%
+  mutate(observed = Weight_kgs,
+         predicted = .fixed) %>%
+  select(Arb_PersonId, N_months_post_id, observed, predicted)
+```
+
+```{r}
+# Pt. 2 of 3
+# convert to long
+obs_pred_long <- 
+  obs_pred %>%
+  group_by(Arb_PersonId, N_months_post_id) %>%
+  pivot_longer(., cols = c(observed, predicted), values_to = "Weight", names_to = "Type") %>%
+  ungroup()
+```
+
+```{r, fig.height = 8, fig.width=6.5, fig.dpi = 600}
+# Pt. 3 of 3
+obs_pred_long %>%
+  left_join(., 
+            (data %>%
+              select(Arb_PersonId, Cohort) %>%
+              distinct()),
+            by = "Arb_PersonId") %>%
+  group_by(N_months_post_id, Type, Cohort) %>%
+  summarise(avg_weight_kgs = mean(Weight), .groups = "drop") %>%
+  filter(N_months_post_id <= 48 ) %>%
+  ggplot(., aes(x = N_months_post_id, y = avg_weight_kgs, color = Type)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap( ~ Cohort) +
+  theme(legend.position="bottom")
+```
+
+## Additional model with quadratic terms
+```{r}
+data <- 
+  data %>%
+  mutate(N_months_post_id_con_sq = N_months_post_id_con ^ 2,
+         N_months_post_id_int_sq = N_months_post_id_int ^ 2)
+```
+
+
+```{r}
+#| echo: true
+# Linear mixed model with quadratic terms
+lmer_mod_bin_quad <- lmerTest::lmer(Weight_kgs ~
+
+          # age
+          age_45_to_60 + age_gt_60 +
+
+          # sex
+          sex_m +
+
+          # race ethnicity
+          reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+          # year at index
+          year_1 + year_2 + year_3 + year_4 +
+            
+          N_months_post_id_con + N_months_post_id_con_sq + N_months_post_id_int + N_months_post_id_int_sq +
+
+          (1| DepartmentExternalName) + (1| Arb_PersonId),
+
+          # Input data frame
+          data = data
+          )
+```
+
+
+
+```{r}
+tbl_regression(lmer_mod_bin_quad, intercept = TRUE) %>%
+    add_glance_table(include = c(nobs, sigma, logLik, AIC, BIC, REMLcrit, df.residual))
+```
+
+
+```{r}
+# Pt. 1 of 3
+# Create figure of observed vs predicted values
+obs_pred <- 
+  bind_cols(data,
+            (broom.mixed::augment(lmer_mod_bin_quad) %>% select(.fixed))) %>%
+  mutate(observed = Weight_kgs,
+         predicted = .fixed) %>%
+  select(Arb_PersonId, N_months_post_id, observed, predicted)
+```
+
+```{r}
+# Pt. 2 of 3
+# convert to long
+obs_pred_long <- 
+  obs_pred %>%
+  group_by(Arb_PersonId, N_months_post_id) %>%
+  pivot_longer(., cols = c(observed, predicted), values_to = "Weight", names_to = "Type") %>%
+  ungroup()
+```
+
+```{r, fig.height = 8, fig.width=6.5, fig.dpi = 600}
+# Pt. 3 of 3
+obs_pred_long %>%
+  left_join(., 
+            (data %>%
+              select(Arb_PersonId, Cohort) %>%
+              distinct()),
+            by = "Arb_PersonId") %>%
+  group_by(N_months_post_id, Type, Cohort) %>%
+  summarise(avg_weight_kgs = mean(Weight), .groups = "drop") %>%
+  filter(N_months_post_id <= 48 ) %>%
+  ggplot(., aes(x = N_months_post_id, y = avg_weight_kgs, color = Type)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap( ~ Cohort) +
+  theme(legend.position="bottom")
+```
+
+
+
+
+```{r, eval = FALSE}
+library(marginaleffects)
+library(modelsummary)
+```
+
+```{r, eval = FALSE}
+# Very similar to summary(), but will provide output in a table format and 
+# include some model diagnostic information like AIC/BIC among others
+modelsummary(lmer_mod_bin)
+```
+
+```{r, eval = FALSE}
+# This is very similar to the predict() function, except that predictions()
+# will also provide a SE, Z, P-val, and SI or each individual prediction
+pred <- predictions(lmer_mod_bin)
+```
+
+```{r, eval = FALSE}
+# This is the average of all values in the Estimate column of pred data frame,
+# but will also include the SE, z, Pvalue and CI
+avg_predictions(lmer_mod_bin)
+```
+
+```{r, eval = FALSE}
+# average counterfactual predictions
+# This will take the mean of the Estimate column in the pred data frame
+# equivalent to taking predict(lmer_mod_bin, data, re.form = NA, type = "response"))
+# binding_cols() to data, and then filtering sex_m == 1, and getting the mean
+avg_predictions(lmer_mod_bin, variables = "sex_m")
+```
+
+```{r, eval = FALSE}
+predicted <- predict(lmer_mod_bin, data, re.form = NA, type = "response")
+bind_cols(pp_mod_data, data.frame(predicted)) %>%
+  mutate(observed = Weight_dv)
+```
+
+```{r, eval = FALSE}
+predictions(lmer_mod_bin, by = "sex_m")
+```
+
+```{r, eval = FALSE}
+plot_predictions(lmer_mod_bin, condition = "EncounterDate")
+``` 

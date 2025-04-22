@@ -1,0 +1,619 @@
+---
+title: "EE vs ENE Models"
+date: "`r Sys.Date()`"
+
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+    toc: true
+
+execute: 
+  echo: false
+---
+
+```{r}
+# ee vs ene data to answer aim 1
+```
+
+```{r, warning=FALSE, message=FALSE}
+invisible(library(tidyverse))
+library(gtsummary)
+library(magrittr, include.only = "%<>%")
+```
+
+```{r}  
+# Set the project root
+proj_root <- "D:/PATHWEIGH/"
+
+# Set the data delivery date to the appropriate data set
+delivery <- "20240917"
+
+# Load pp_data for ensuring that the same 9,358 patients are analyzed
+load(str_c(proj_root, "delivery_", delivery, "/data/pp_data_", delivery, ".Rdata"))
+
+# Load visits_post_id to create merge in variables
+load(str_c(proj_root, "delivery_", delivery, "/data/visits_post_id_", delivery, ".Rdata"))
+
+# Load pp_mod_data for merging in variables
+# load(str_c(proj_root, "delivery_", delivery, "/data/pp_mod_data_", delivery, ".Rdata"))
+
+# Save a copy as data so that it can be used as an input to other code chunks
+# data <- pp_data
+
+# Load comorbidity names for tables
+# comorbidity_names <- readRDS(str_c(proj_root, "delivery_", delivery, "/data/comorbidity_names_", delivery, ".RDS"))
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Load data
+# Set Cystatin C column to for importing as double, otherwise there may be too
+# many NAs in the first x rows where read_csv() decides what column to assign.
+# It may then assign first as logical, but then encounters a problem when it
+# finally encounters a numeric value.
+data <- read_csv("D:\\PATHWEIGH\\delivery_20240917\\data\\aim3_its_data_20240917.csv")
+```
+
+```{r}
+# Convert days to months
+data %<>% 
+  mutate(N_months_post_id_con = N_days_post_id / 30,
+         N_months_post_id_int = N_days_post_int / 30,
+         N_months_post_wpv_con = N_days_post_wpv / 30,
+         N_months_post_wpv_int = N_days_post_wpv_int / 30,
+         N_months_post_pw = N_days_post_pw / 30)
+```
+
+```{r}
+# Filter patients who have WPVs
+# ids_con <- 
+#   data %>%
+#     filter(EE == 1, WP_Visit == 1, Intervention.factor == "Control") %>%
+#     select(Arb_PersonId) %>%
+#     distinct() %>%
+#     pull(Arb_PersonId)
+
+# ids_int <- 
+#   data %>%
+#     filter(EE == 1, WP_Visit == 1, Intervention.factor == "Intervention") %>%
+#     select(Arb_PersonId) %>%
+#     distinct() %>%
+#     pull(Arb_PersonId)
+
+
+
+# n_visits_per_pt_con <- 
+#   data %>%
+#     filter(Arb_PersonId %in% ids_con, Intervention.factor == "Control") %>%
+#     group_by(Arb_PersonId) %>%
+#     count() %>%
+#     ungroup() %>%
+#     filter(n > 1)
+
+# n_visits_per_pt_int <- 
+#   data %>%
+#     filter(Arb_PersonId %in% ids_int, Intervention.factor == "Intervention") %>%
+#     group_by(Arb_PersonId) %>%
+#     count() %>%
+#     ungroup() %>%
+#     filter(n > 1)
+
+
+# sum(ids_int %in% ids_con)
+
+# sum(ids_con %in% ids_int)
+```
+
+```{r}
+#| eval: false
+# data %>% 
+#   filter(Arb_PersonId %in% pp_data$Arb_PersonId) %>%
+#   # drop_na(Weight_kgs) %>% # No visits with missing weight
+#   # filter(Censored == 0) %>% # No censored visits in the data
+#   nrow()
+
+# # Check the max index date
+# data %>%
+#   pull(IndexDate) %>%
+#   max()
+```
+
+```{r}
+# Filter the data frame to only those visits from the 9,358 sample in Aim1
+# data %<>% 
+#   filter(Arb_PersonId %in% pp_data$Arb_PersonId)
+
+# Check the number of patients
+# Results in 9,345 instead of 9,358
+# These are unique patients, but not necessarily those that have
+# 2 or more visits.
+# data %>%
+#   pull(Arb_PersonId) %>%
+#   n_distinct()
+
+# excluded_pts <- 
+# pp_data %>%
+#   filter(!Arb_PersonId %in% data$Arb_PersonId)
+```
+
+```{r}
+# There are 85,771 patients that have 2 or more visits in both phases in general
+# There are 9,163 patients that have 2 or more visits in both phases
+# after filtering for those that were in the pp_data set???
+#
+# ids <- data %>%
+#   group_by(Arb_PersonId, Intervention.factor) %>%
+#   count() %>%
+#   ungroup() %>%
+#   pivot_wider(names_from = Intervention.factor, values_from = n) %>%
+#   mutate(across(Control:Intervention, ~ifelse(is.na(.x), 0, .x))) %>%
+#   filter(Control >= 2, Intervention >= 2)
+```
+
+# Logistic regression model
+```{r}
+lmer_log_data <- 
+  data %>% 
+  group_by(Arb_PersonId, Intervention) %>%
+  arrange(EncounterDate) %>%
+  slice_head() %>%
+  ungroup()
+
+lmer_log_data %>%
+  lmer_log_data(Race_Ethnicity = factor(Race_Ethnicity, 
+                                        levels = c("Non-Hispanic White", 
+                                                   "Asian", 
+                                                   "Black or African American", 
+                                                   "Hispanic or Latino", 
+                                                   "Other", 
+                                                   "Unknown")),
+                Age_cat =  factor(Age_cat, levels = c("45-60", "<=45", ">60"))
+  )
+```
+
+```{r}
+# Tabulate the number of visits in each phase for each patient
+n_visits_per_pt <- 
+  data %>%
+  group_by(Arb_PersonId, Intervention.factor) %>%
+  count() %>%
+  ungroup() %>%
+  pivot_wider(names_from = Intervention.factor, values_from = n) %>%
+  mutate(across(Control:Intervention, ~ifelse(is.na(.x), 0, .x)))
+```
+
+```{r}
+# patients only in control
+pts_in_con_only <- 
+  n_visits_per_pt %>%
+  filter(Control > 0, Intervention == 0) %>%
+  pull(Arb_PersonId)
+```
+
+```{r}
+lmer_log_data %<>%
+  mutate(Visits_in_con_only = ifelse(Arb_PersonId %in% pts_in_con_only, 1, 0))
+```
+
+```{r}
+# echo: true
+# Binary indicator for patients who only have visits in the intervention phase
+tictoc::tic()
+
+log_mod <- geepack::geeglm(
+    EE ~ Age_cat + 
+      Sex + 
+      Race_Ethnicity + 
+      Year_at_ind + 
+      Weight_bl + 
+      Intervention + 
+      Index_int + 
+      Visits_in_con_only,
+    family = "binomial",
+    id = Arb_PersonId, 
+    data = lmer_log_data)
+
+tictoc::toc()
+```
+
+```{r}
+tbl_regression(log_mod, intercept = TRUE, exponentiate = TRUE) %>%
+  as_gt() %>%
+  gt::gtsave(., filename = "D:/PATHWEIGH/delivery_20240917/scripts/ee_vs_ene/ee_vs_ene_log_model.docx" )
+```
+
+```{r}
+# eval: false
+# mixed effects logistic regression model
+#| echo: false
+# Linear mixed model with binary variables
+# This model failed
+
+lmer_log <- 
+  lme4::glmer(
+    EE ~ Age_cat + Sex + Race_Ethnicity + Year_at_ind + Weight_bl + Intervention + Index_int +
+
+    (1| DepartmentExternalName) + (1| Arb_PersonId),
+
+    family = "binomial",
+
+    # Input data frame
+    data = lmer_log_data
+    )
+```
+
+```{r}
+# tbl_regression(lmer_log)
+```
+
+```{r}
+# names(data)
+```
+
+## Generalized estimating equation models 
+
+```{r}
+n_missing_values <- 
+  data %>%
+  select(Weight_dv, age_45_to_60, age_gt_60, sex_m, 
+         reth_his, reth_blk, reth_asn, reth_oth, reth_ukn,
+         year_at_ind1, year_at_ind2, year_at_ind3,
+         N_months_post_id_con, N_months_post_wpv_con,
+         N_months_post_id_int, N_months_post_wpv_int,
+         N_months_post_pw) %>%
+  summarize_all(~ sum(is.na(.)))
+```
+
+```{r}
+#| echo: true
+gee_formula <- Weight_dv ~
+  # age
+  age_45_to_60 + age_gt_60 +
+
+  # sex
+  sex_m +
+
+  # race ethnicity
+  reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+  # Year at the index visit (first visit with a weight)
+  year_at_ind1 + year_at_ind2 + year_at_ind3 +
+    
+  # Time variables
+  N_months_post_id_con + 
+  N_months_post_wpv_con +
+  N_months_post_id_int +
+  N_months_post_wpv_int +
+  N_months_post_pw
+```
+
+## Independence as correlation structure
+```{r}
+#| echo: true
+gee_mod_ind <- geepack::geeglm(
+  formula = gee_formula,
+
+  # Subject ID
+  id = Arb_PersonId,
+
+  # Corr Str
+  corstr = "independence",
+
+  # Input data frame
+  data = data
+  )
+```
+
+```{r}
+tbl_regression(gee_mod_ind, intercept = TRUE) %>%
+  add_glance_table(include = c(df.residual, n.clusters, max.cluster.size, alpha, gamma)) %>%
+  as_gt() %>%
+  gt::gtsave(., filename = "D:/PATHWEIGH/delivery_20240917/scripts/ee_vs_ene/ee_vs_ene_gee_ind_model.docx" )
+```
+
+### QIC
+```{r}
+geepack::QIC(gee_mod_ind)
+```
+
+### VIF
+```{r}
+car::vif(gee_mod_ind)
+```
+
+## Exchangeable as correlation structure
+```{r}
+#| echo: true
+gee_mod_exc <- geepack::geeglm(
+  formula = gee_formula,
+
+  # Subject ID
+  id = Arb_PersonId,
+
+  # Corr Str
+  corstr = "exchangeable",
+
+  # Input data frame
+  data = data
+  )
+```
+
+```{r}
+tbl_regression(gee_mod_exc, intercept = TRUE) %>%
+  add_glance_table(include = c(df.residual, n.clusters, max.cluster.size, alpha, gamma)) %>%
+  as_gt() %>%
+  gt::gtsave(., filename = "D:/PATHWEIGH/delivery_20240917/scripts/ee_vs_ene/ee_vs_ene_gee_exc_model.docx" )
+```
+
+### QIC
+```{r}
+geepack::QIC(gee_mod_exc)
+# QIC = 5.858+08
+```
+
+### VIF
+```{r}
+car::vif(gee_mod_exc)
+```
+
+
+```{r}
+# Plot the observed and predicted values
+obs_pred <- bind_cols(
+  data,
+  data.frame(predicted = predict(gee_mod_exc, data, type = "response"))
+  ) %>%
+    mutate(observed = Weight_dv) %>%
+    select(Arb_PersonId, N_months_post_id, observed, predicted, Intervention.factor, Cohort, GroupID)
+
+# convert to long
+obs_pred_long <- 
+  obs_pred %>%
+  group_by(Arb_PersonId, N_months_post_id) %>%
+  pivot_longer(., cols = c(observed, predicted), values_to = "Weight", names_to = "Type") %>%
+  ungroup()
+
+# display plot
+obs_pred_long %>%
+  group_by(N_months_post_id, Type) %>% # We could make the average profile and make 18 months 
+  summarise(avg_weight_kgs = mean(Weight), .groups = "drop") %>%
+  filter(N_months_post_id <= 48 ) %>%
+  ggplot(., aes(x = N_months_post_id, y = avg_weight_kgs, color = Type)) +
+  geom_point() +
+  geom_line() + 
+  theme(legend.position="bottom")
+```
+
+```{r}
+obs_pred %>%
+  select(observed, predicted) %>%
+  summarise_all(~ mean(.))
+```
+
+
+```{r}
+# Plot the pridected and residual values
+
+# Extract fitted values and residuals
+fitted_vals <- fitted(gee_mod_exc)
+residuals <- residuals(gee_mod_exc)
+
+# Basic diagnostic plot
+plot(fitted_vals, residuals,
+     xlab = "Fitted values",
+     ylab = "Residuals",
+     main = "Residuals vs Fitted")
+abline(h = 0, col = "red")
+
+```
+
+```{r}
+
+```
+
+```{r}
+# Add residuals and fitted values to your dataset
+dx_data <- data %>% select(Arb_PersonId, Age_cat, Cohort, GroupID, Year_at_ind)
+
+dx_data$residuals <- residuals(gee_mod_exc)
+dx_data$fitted <- fitted(gee_mod_exc)
+
+# Sample 1000 individuals
+pt_ids <- dx_data %>%
+  select(Arb_PersonId) %>%
+  distinct()
+
+# Sample 1,000 patients
+# dx_data %<>%
+#   filter(Arb_PersonId %in% sample_n(pt_ids, 1000, replace = FALSE)$Arb_PersonId) 
+
+
+dx_data %>%
+  group_by(Arb_PersonId) %>%
+  select(fitted, residuals) %>%
+  summarise_all( ~ mean(.), .groups = "drop") %>%
+# Plot with color by a 3-level categorical predictor (e.g., AgeGroup)
+  ggplot(., aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, color = "red") +
+  # labs(title = "Residuals vs Fitted by Age Group") +
+  theme_minimal()
+
+
+
+# ggplot(dx_data, aes(x = fitted, y = residuals, color = factor(GroupID))) +
+#   geom_point(alpha = 0.5) +
+#   geom_hline(yintercept = 0, color = "red") +
+#   # labs(title = "Residuals vs Fitted by GroupID") +
+#   theme_minimal()
+```
+
+
+# Distribution of time variables
+## N_months_post_id_con
+```{r}
+tictoc::tic()
+data %>%
+  filter(N_months_post_id_con != 0) %>%
+  group_by(Arb_PersonId) %>%
+  slice_max(N_months_post_id_con) %>%
+  ungroup() %>%
+  select(N_months_post_id) %>%
+  ggplot(., aes(x = N_months_post_id)) +
+  geom_histogram()
+tictoc::tic()
+```
+
+```{r}
+data %>%
+  filter(N_months_post_wpv_con != 0) %>%
+  group_by(Arb_PersonId) %>%
+  slice_max(N_months_post_wpv_con) %>%
+  ungroup() %>%
+  select(N_months_post_id) %>%
+  ggplot(., aes(x = N_months_post_id)) +
+  geom_histogram()
+```
+
+```{r}
+data %>%
+  filter(N_months_post_wpv_con != 0) %>%
+  group_by(Arb_PersonId) %>%
+  slice_max(N_months_post_wpv_con) %>%
+  ungroup() %>%
+  select(N_months_post_id) %>%
+  ggplot(., aes(x = N_months_post_id)) +
+  geom_histogram()
+
+```
+
+
+```{r}
+data %>%
+  filter(N_months_post_id_int != 0) %>%
+  group_by(Arb_PersonId) %>%
+  slice_max(N_months_post_id_int) %>%
+  ungroup() %>%
+  select(N_months_post_id) %>%
+  ggplot(., aes(x = N_months_post_id)) +
+  geom_histogram()
+```
+
+
+```{r}
+data %>%
+  filter(N_months_post_wpv_int != 0) %>%
+  group_by(Arb_PersonId) %>%
+  slice_max(N_months_post_wpv_int) %>%
+  ungroup() %>%
+  select(N_months_post_id) %>%
+  ggplot(., aes(x = N_months_post_id)) +
+  geom_histogram()
+```
+
+
+```{r}
+data %>%
+  filter(N_months_post_pw != 0) %>%
+  group_by(Arb_PersonId) %>%
+  slice_max(N_months_post_pw) %>%
+  ungroup() %>%
+  select(N_months_post_id) %>%
+  ggplot(., aes(x = N_months_post_id)) +
+  geom_histogram()
+```
+
+## lmer model
+```{r}
+data %<>%
+  mutate(N_months_post_id_con_180 = N_months_post_id_con,
+         N_months_post_id_int_180 = N_months_post_id_int,
+         N_months_post_wpv_con_180 = N_months_post_wpv_con,
+         N_months_post_wpv_int_180 = N_months_post_wpv_int,
+         N_months_post_pw_180 = N_months_post_pw) %>%
+  mutate(N_months_post_id_con_180 = ifelse(N_months_post_id_con <= 6, 0, N_months_post_id_con_180 - 6),
+         N_months_post_id_int_180 = ifelse(N_months_post_id_int_180 <= 6, 0, N_months_post_id_int_180 - 6),
+         N_months_post_wpv_con_180 = ifelse(N_months_post_wpv_con_180 <= 6, 0, N_months_post_wpv_con_180 - 6),
+         N_months_post_wpv_int_180 =ifelse(N_months_post_wpv_int_180 <= 6, 0, N_months_post_wpv_int_180 - 6),
+         N_months_post_pw_180 = ifelse(N_months_post_pw_180 <= 6, 0, N_months_post_pw_180  - 6), )
+```
+
+```{r}
+data %<>%
+  mutate(
+    year0 = ifelse(Year == "Year0", 1, 0),
+    year1 = ifelse(Year == "Year1", 1, 0),
+    year2 = ifelse(Year == "Year2", 1, 0),
+    year3 = ifelse(Year == "Year3", 1, 0),
+    year4 = ifelse(Year == "Year4", 1, 0))
+```
+
+```{r, eval = FALSE}
+lmer_mod_2pc_per_var <- 
+  lmerTest::lmer(Weight_dv ~
+  # age
+  age_45_to_60 + age_gt_60 +
+
+  # sex
+  sex_m +
+
+  # race ethnicity
+  reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+  # Year at the index visit (first visit with a weight)
+  # year_at_ind1 + year_at_ind2 + year_at_ind3 +
+
+  # Year in which the encounter took place
+  year1 + year2 + year3 + year4 +
+    
+  # Time variables
+  N_months_post_id_con + N_months_post_id_con_180 +
+  N_months_post_wpv_con + N_months_post_wpv_con_180 +
+  N_months_post_id_int + N_months_post_id_int_180 +
+  N_months_post_wpv_int + N_months_post_wpv_int_180 +
+  N_months_post_pw + N_months_post_pw_180 +
+  (1| DepartmentExternalName) +
+  (1| Arb_PersonId),
+  data = data)
+```
+
+```{r}
+tbl_regression(lmer_mod_2pc_per_var, intercept = TRUE) %>%
+  add_glance_table(include = c("nobs", "sigma", "logLik", "AIC", "BIC", "REMLcrit", "df.residual")) %>%
+  as_gt() %>%
+  gt::gtsave(., filename = "D:/PATHWEIGH/delivery_20240917/scripts/ee_vs_ene/ee_vs_ene_lmer_2pc_per_var_model_year_visit.docx" )
+```
+
+```{r}
+# Plot the pridected and residual values
+
+# Extract fitted values and residuals
+fitted_vals <- fitted(lmer_mod_2pc_per_var)
+residuals <- residuals(lmer_mod_2pc_per_var)
+
+# Basic diagnostic plot
+plot(fitted_vals, residuals,
+     xlab = "Fitted values",
+     ylab = "Residuals",
+     main = "Residuals vs Fitted")
+abline(h = 0, col = "red")
+
+```
+
+### Percent of patients with a WPV
+
+```{r}
+pts_ids_w_wpv <- 
+  data %>%
+  filter(WP_Visit == 1) %>%
+  select(Arb_PersonId) %>%
+  distinct() %>%
+  mutate(had_wpv = 1)
+
+# Percent of patients that had a wpv in the entire sample is about 25%
+data %>%
+  filter(IndexVisit == 1) %>%
+  left_join(., pts_ids_w_wpv, by = "Arb_PersonId") %>%
+  mutate(had_wpv = ifelse(is.na(had_wpv), 0, had_wpv)) %>%
+  select(had_wpv) %>%
+  tbl_summary()
+```

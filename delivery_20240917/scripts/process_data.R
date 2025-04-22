@@ -76,6 +76,7 @@
 # Year 1 March 17, 2021 - March 16, 2022, Group 1 crosses over to intervention
 # Year 2 March 17, 2022 - March 16, 2023, Group 2 crosses over to intervention
 # Year 3 March 17, 2023 - March 16, 2024, Group 3 crosses over to intervention
+# Year 4 March 17, 2024 - end date of data delivery
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 # %% Load Packages -------------------------------------------------------------
@@ -328,6 +329,8 @@ if (data.frame(grep("O2CPAPBIPAP", (names(visits_post_id)))) %>% nrow() > 0) {
 # Create a data frame for the primary aim statistical models. Automatically
 # outputs mod_data_full which consists of ee and ene data and mod_data_ee, the
 # subset of ee patients only to ./data of the current project directory.
+# All of these data sets were capped at N_months_post_id < 18
+# N.B. mod_data no longer used
 mod_data <- ee_ene %>% make_mod_data(., data_delivery_date)
 
 # Make pp_data -----------------------------------------------------------------

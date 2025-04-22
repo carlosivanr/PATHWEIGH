@@ -31,9 +31,10 @@ make_mod_data <- function(data, delivery) {
 
   # Create separate intervention and control data frames -----------------------
   # In order to capture change in weight, each patient must have at least 2
-  # visits in each of the control and intervention phases
+  # visits in each of the control and intervention phases.
   # Uses two separate vectors of patient ids so that ee_ene can be filtered
-  # in each separate phase
+  # in each separate phase, and prevent potentially filtering patients with 2
+  # visits in control and 1 visit in intervention.
 
   # capture the patient ids for those that have more than 1 visit in the control
   # phase to use in modelling
@@ -84,6 +85,7 @@ make_mod_data <- function(data, delivery) {
              N_days_post_id,
              Intervention.factor,
              EE,
+             Censored,
              starts_with("WPV_"),
              PW_Visit) %>%
 

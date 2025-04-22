@@ -14,14 +14,16 @@ pacman::p_load(tidyverse,
 
 # %% Load data ----------------------------------------------------------------
 # Start with the original ee_ene data set, but then re-assign the index dates
-# and create new variables
+# and create new variables. This is the output from create_ee_vs_ene_data.R
 data <- read_csv("D:\\PATHWEIGH\\delivery_20240917\\data\\aim3_data_20240917.csv",
                  col_types = cols(`Cystatin C` = col_double()))
 
+# Convert columns to factor
 data %<>%
   mutate(across(Arb_PersonId:Arb_EncounterId, ~ as.factor(.x)))
                  
 # %% Reassign the index dates -------------------------------------------------
+# Get the first of the index date out of both phases
 index_dates <- 
   data %>%
   arrange(Arb_PersonId, IndexDate) %>% # The first index date will become the one and only index date
@@ -35,20 +37,22 @@ index_dates <-
 its_data <- data
 
 # Remove the index date column from its_data so that a new one can be added
-its_data %<>% select(-IndexDate, -N_months_post_lv, -LastVisit, -N_months_post_lv_cat, -LastVisit_Weight)
+its_data %<>% 
+  select(-IndexDate, -N_months_post_lv, -LastVisit, -N_months_post_lv_cat, -LastVisit_Weight)
 
 # Merge in with index_dates where it's only one index date per person
 its_data %<>%
   left_join(., index_dates, by = "Arb_PersonId")
 
 
-# Check to see if there are any missing index dates
+# Check to see if there are any missing index dates, should == 0
 its_data %>%
   filter(is.na(IndexDate)) %>%
   nrow()
 
 # Check to see how many unique IndexDates per patient
 # Each patient gets one and only one IndexDate
+# Should = 0
 its_data %>%
   group_by(Arb_PersonId) %>%
   summarise(n_unique = n_distinct(IndexDate)) %>%
@@ -61,6 +65,7 @@ its_data %<>%
   mutate(N_days_post_id = EncounterDate - IndexDate)
 
 # Check how many N_days_post_id are negative
+# should be 0
 its_data %>%
   filter(N_days_post_id < 0) %>%
   nrow()
@@ -76,6 +81,7 @@ first_visit_int <- its_data %>%
   select(Arb_PersonId, EncounterDate) %>%
   rename(first_visit_int = EncounterDate)
 
+# Merge in the date of the first visit in the intervention
 its_data %<>%
   left_join(., first_visit_int, by = "Arb_PersonId")
 
@@ -85,17 +91,20 @@ its_data %<>%
   mutate(N_days_post_int = EncounterDate - first_visit_int)
 
 # Check for negative values
+# This is expected to produce negative values for visits
+# Would also produce missing values for those that did not have an index visit
+# in the intervention
 its_data %>%
   filter(N_days_post_int < 0) %>%
   nrow()
 
-# Address any negative values, indicates the the encounter was before the first
+# Address any NEGATIVE values, indicates the the encounter was before the first
 # visit in the intervention. All visits prior to the first visit in the 
 # intervention will be 0
 its_data %<>%
   mutate(N_days_post_int = ifelse(N_days_post_int < 0, 0, N_days_post_int))
 
-# Address any missing values, indicates that the patient never had a visit in
+# Address any MISSING values, indicates that the patient never had a visit in
 # the intervention, these are folks with visits only in the control phase
 its_data %<>%
   mutate(N_days_post_int = ifelse(is.na(N_days_post_int), 0, N_days_post_int))
@@ -235,13 +244,6 @@ its_data %<>%
   mutate(N_days_post_pw = ifelse(is.na(N_days_post_pw), 0, N_days_post_pw))
 
 
-# Clean up Index Visit for rows where the intervention is == 1
-# If the IndexDate does not match the EncounterDate, then IndexVisit = 0
-
-# Clean up comorbidities, labs, meds procedures
-# If visit is not indexvisit, and values from columns of interest are not missing, then set to missing
-
-
 # %% Cumulative count of WPVs -------------------------------------------------
 # WPV is a sum variable, WP_Visit is a binary variable
 # Use WP_Visit
@@ -254,6 +256,8 @@ WPV_counts <-
   ungroup() %>%
   select(Arb_EncounterId, WPV_count)
 
+# Clean up the count variable and ensure that it is counting the number of 
+# prior WPVs
 its_data %<>%
   left_join(., WPV_counts, by = "Arb_EncounterId") %>%
   arrange(Arb_PersonId, EncounterDate) %>%
@@ -308,14 +312,19 @@ its_data %<>%
   left_join(., weight_bls, by = "Arb_PersonId")
 
 
+# /////////////////////////////////////////////////////////////////////////////
+# Check the max index date
+its_data %>%
+  pull(IndexDate) %>%
+  max()
 
 
+
+# /////////////////////////////////////////////////////////////////////////////
 # *** Will need to check if the first visit needs to have an NPI?
-
-
-
-
-# *** Fix the IndexVisit
+# According to the SAP, no such specification was requested
+# Reassign the IndexVisit to the first visit with weight as opposed to the 1st
+# WPV
 index_visits <- its_data %>%
   arrange(Arb_PersonId, EncounterDate) %>%
   group_by(Arb_PersonId) %>%
@@ -335,7 +344,7 @@ its_data %<>%
 
 test <- 
 its_data %>%
-  select(Arb_PersonId, EncounterDate, IndexDate, IndexVisit,
+  select(Arb_PersonId, EncounterDate, Arb_EncounterId, IndexDate, IndexVisit,
          Race_Ethnicity, Intervention, EE, Weight_bl, Weight_dv,
          WP_Visit, PW_Visit,
          starts_with("N_days"),
@@ -344,7 +353,7 @@ its_data %>%
   arrange(Arb_PersonId) %>%
   head(100)
 
-write_csv(test, file = "D:\\PATHWEIGH\\delivery_20240917\\data\\aim3_its_test_data_20240917.csv")
+# write_csv(test, file = "D:\\PATHWEIGH\\delivery_20240917\\data\\aim3_its_test_data_20240917.csv")
 
 
 # Write out the interrupted time series data set ------------------------------

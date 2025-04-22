@@ -26,6 +26,7 @@ pp_data <-
   filter(Arb_PersonId %in% (mod_data[["ee"]]$Arb_PersonId))
 
 # Filter data set to less than or equal to 18 months after the index date
+# as this is a requirement for the modelling
 pp_data <-
   pp_data %>%
   filter(N_months_post_id <= 18)

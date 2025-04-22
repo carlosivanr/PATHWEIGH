@@ -8,6 +8,13 @@ execute:
   echo: false
 ---
 
+```{r}
+# Added supplementary table 2
+# Conducted prop.test instead of chisq.test
+# Add p-values to table 2
+# Confidence intervals
+```
+
 ```{r, warning=FALSE, message=FALSE}
 invisible(library(tidyverse))
 library(gtsummary)
@@ -376,7 +383,11 @@ tab2b <-
 # Add the p-values to get the difference in proportions for referrals
 tab2b <- 
   tab2b %>%
-  add_p()
+  add_p(test = list(all_categorical() ~ "prop.test"))
+```
+
+```{r}
+
 ```
 
 ```{r}
@@ -390,6 +401,42 @@ tbl_stack(tbls) %>%
   ) %>%
   as_gt()
 ```
+
+```{r}
+# Test if two proportions are equal for Referral to bariatric surgery
+prop.test(x = c(266, 307), n = c(9358, 9358))
+```
+
+```{r}
+# Test if two proportions are equal for Referral to bx health
+prop.test(x = c(315, 312), n = c(9358, 9358))
+```
+
+```{r}
+# Test if two proportions are equal for Referral to dietician
+prop.test(x = c(783, 818), n = c(9358, 9358))
+```
+
+```{r}
+# Test if two proportions are equal for Referral to endocrinology
+prop.test(x = c(859, 936), n = c(9358, 9358))
+```
+
+```{r}
+# Test if two proportions are equal for Referral to wellness clinic
+prop.test(x = c(557, 466), n = c(9358, 9358))
+```
+
+```{r}
+# Test if two proportions are equal for Referral to bariatric surg
+prop.test(x = c(51, 83), n = c(9358, 9358))
+```
+
+```{r}
+# Test if two proportions are equal for prescribed AOM
+prop.test(x = c(1174, 1686), n = c(9358, 9358))
+```
+
 
 # Figure: Clinic Engagement
 ```{r}
