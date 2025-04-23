@@ -158,8 +158,9 @@ lmer_log_data <-
   slice_head() %>%
   ungroup()
 
+lmer_log_data <- 
 lmer_log_data %>%
-  lmer_log_data(Race_Ethnicity = factor(Race_Ethnicity, 
+  mutate(Race_Ethnicity = factor(Race_Ethnicity, 
                                         levels = c("Non-Hispanic White", 
                                                    "Asian", 
                                                    "Black or African American", 
@@ -213,6 +214,7 @@ log_mod <- geepack::geeglm(
     data = lmer_log_data)
 
 tictoc::toc()
+beepr::beep(sound = 2)
 ```
 
 ```{r}
