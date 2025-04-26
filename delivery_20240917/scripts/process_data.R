@@ -97,14 +97,14 @@ data_delivery_date <- 20240917
 date_min <- as.Date("2020-03-17")
 date_max <- as.Date(lubridate::ymd(data_delivery_date))
 
-# Source sub-scripts -----------------------------------------------------------
-# Loads all subscript functions into the workspace
-
 # Set the path to the emr_data_processing directory to load scripts/functions
 # that are shared along all separate data deliveries
 proj_root_dir <- str_c("delivery_", data_delivery_date)
 proj_parent_dir <- str_remove(here(), proj_root_dir)
 emr_dir <- str_c(proj_parent_dir, "/emr_data_processing/")
+
+# Source sub-scripts -----------------------------------------------------------
+# Loads all subscript functions into the workspace
 
 # Loads the common set of functions for data deliveries 03-22-2023 and beyond
 source(str_c(emr_dir, "subscripts/source_subscripts.R"))

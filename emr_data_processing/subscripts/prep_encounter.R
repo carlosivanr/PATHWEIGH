@@ -31,7 +31,7 @@ prep_encounter <- function(temp) {
   # Fill in missing values of height from the last available value
   temp %<>%
     # filter(Arb_EncounterId %in% test$Arb_EncounterId) %>%
-    arrange(Arb_PersonId, Arb_EncounterId) %>%
+    arrange(Arb_PersonId, EncounterDate) %>%
     group_by(Arb_PersonId) %>%
     fill(Height, .direction = "down") %>%
     ungroup()

@@ -1,0 +1,210 @@
+---
+title: "EE vs ENE Patient Flow Diagram"
+date: "`r Sys.Date()`"
+
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+    toc: true
+
+execute: 
+  echo: false
+---
+
+```{r}
+# ee vs ene data to answer aim 1
+```
+
+```{r, warning=FALSE, message=FALSE}
+invisible(library(tidyverse))
+library(gtsummary)
+library(magrittr, include.only = "%<>%")
+
+# Loads the common set of functions for data deliveries 03-22-2023 and beyond
+source(str_c(emr_dir, "subscripts/source_subscripts.R"))
+```
+
+## Total number of encounters delivered
+
+```{r}
+# Current participant flow diagram starts with total unique number of encounters delivered
+# not the number of encounters from 18+ and BMI > 25
+read_pw_csv("encounter")
+```
+
+```{r}
+encounter %>%
+    distinct(Arb_EncounterId) %>%
+    nrow()
+```
+
+## Total number of patients
+```{r}
+encounter %>%
+    distinct(Arb_PersonId) %>%
+    nrow()
+```
+
+## Total number of eligible patients 18+, BMI >= 25, and two or more visits with a recorded weight
+```{r}
+# Number of eligible patients
+data <- read_csv("D:\\PATHWEIGH\\delivery_20240917\\data\\aim3_its_data_20240917.csv")
+```
+
+```{r}
+# Fix the EE column
+ee_pts <- 
+    data %>%
+    filter(WP_Visit == 1) %>%
+    distinct(Arb_PersonId)
+
+data <- 
+    data %>%
+    mutate(EE = ifelse(Arb_PersonId %in% ee_pts$Arb_PersonId, 1, 0))
+```
+
+
+
+```{r}
+data %>%
+    select(Arb_PersonId) %>%
+    distinct() %>%
+    nrow()
+```
+
+```{r}
+#| eval: false
+# Check that each patient has 2 or more visits
+
+data %>% 
+    group_by(Arb_PersonId) %>%
+    count() %>%
+    ungroup() %>%
+    filter(n < 2) %>%
+    nrow()
+```
+
+## Total number of patients that received care for their weight (WPV)
+- had at least one wpv at any time during the study period, regardless of what phase it was in
+
+```{r}
+n_wpv_visits <- 
+    data %>% 
+    filter(WP_Visit == 1) %>%
+    group_by(Arb_PersonId, Intervention.factor) %>%
+    count() %>%
+    ungroup() %>%
+    pivot_wider(names_from = Intervention.factor, values_from = n) %>%
+    mutate(across(Control:Intervention, ~ifelse(is.na(.x), 0, .x)))
+```
+
+```{r}
+n_wpv_visits %>%
+    select(Arb_PersonId) %>%
+    distinct() %>%
+    nrow()
+```
+
+### Total number of patients who received care for their weight in control only
+```{r}
+n_wpv_visits %>%
+    filter(Control > 0, Intervention == 0) %>%
+    nrow()
+```
+
+
+### Total number of patients who received care for their weight in intervention only
+```{r}
+n_wpv_visits %>%
+    filter(Control == 0, Intervention > 0) %>%
+    nrow()
+```
+
+### Total number of patients who received care for their weight in both phases
+
+```{r}
+n_wpv_visits %>%
+    filter(Control > 0, Intervention > 0) %>%
+    nrow()
+```
+
+## Number of patients that have visits across multiple clinics
+```{r}
+# How many patients have visits in multiple clinics
+data %>%
+    group_by(Arb_PersonId) %>%
+    summarise(distinct_groups = n_distinct(GroupID)) %>%
+    filter(distinct_groups > 1) %>%
+    nrow()
+```
+
+# Number of patients in each cohort
+```{r}
+data %>%
+    filter(EE == 1) %>%
+    group_by(Arb_PersonId) %>%
+    slice_head() %>%
+    ungroup() %>%
+    select(Cohort) %>%
+    tbl_summary()
+
+
+data %>%
+    filter(WP_Visit == 1) %>%
+    group_by(Arb_PersonId) %>%
+    slice_head() %>%
+    ungroup() %>%
+    select(Cohort) %>%
+    tbl_summary()
+
+
+data %>%
+    filter(WP_Visit == 1) %>%
+    pull(EE) %>%
+    table()
+
+
+data %>%
+    filter(EE == 1) %>%
+    pull(WP_Visit) %>%
+    table()
+```
+
+
+```{r}
+data %>%
+    filter(EE == 1) %>%
+    select(Arb_PersonId) %>%
+    distinct() %>%
+    nrow()
+```
+
+
+```{r}
+pt_ids_w_wpv <- 
+    data %>%
+    filter(WP_Visit == 1) %>%
+    select(Arb_PersonId) %>%
+    distinct()
+```
+
+
+```{r}
+pt_ids_w_ee <- 
+    data %>%
+    filter(EE == 1) %>%
+    select(Arb_PersonId) %>%
+    distinct()
+```
+
+
+```{r}
+ids_to_check <- anti_join(pt_ids_w_ee, pt_ids_w_wpv)
+```
+
+
+```{r}
+inspect_df <- data %>%
+    filter(Arb_PersonId %in% ids_to_check$Arb_PersonId) %>%
+    select(Arb_PersonId, Arb_EncounterId, EncounterDate, EE, WP_Visit, Intervention.factor)
+```

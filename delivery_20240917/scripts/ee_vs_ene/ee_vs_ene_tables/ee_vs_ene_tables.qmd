@@ -1,0 +1,222 @@
+---
+title: "EE vs ENE tables"
+date: "`r Sys.Date()`"
+
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+    toc: true
+
+execute: 
+  echo: false
+---
+
+
+```{r, warning=FALSE, message=FALSE}
+invisible(library(tidyverse))
+library(gtsummary)
+library(magrittr, include.only = "%<>%")
+```
+
+```{r}  
+# Set the project root
+proj_root <- "D:/PATHWEIGH/"
+
+# Set the data delivery date to the appropriate data set
+delivery <- "20240917"
+
+# Load pp_data for ensuring that the same 9,358 patients are analyzed
+load(str_c(proj_root, "delivery_", delivery, "/data/pp_data_", delivery, ".Rdata"))
+
+# Load visits_post_id to create merge in variables
+load(str_c(proj_root, "delivery_", delivery, "/data/visits_post_id_", delivery, ".Rdata"))
+
+# Load pp_mod_data for merging in variables
+# load(str_c(proj_root, "delivery_", delivery, "/data/pp_mod_data_", delivery, ".Rdata"))
+
+# Save a copy as data so that it can be used as an input to other code chunks
+# data <- pp_data
+
+# Load comorbidity names for tables
+# comorbidity_names <- readRDS(str_c(proj_root, "delivery_", delivery, "/data/comorbidity_names_", delivery, ".RDS"))
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Load data
+# Set Cystatin C column to for importing as double, otherwise there may be too
+# many NAs in the first x rows where read_csv() decides what column to assign.
+# It may then assign first as logical, but then encounters a problem when it
+# finally encounters a numeric value.
+data <- read_csv("D:\\PATHWEIGH\\delivery_20240917\\data\\aim3_its_data_20240917.csv")
+```
+
+# Total number of patients
+
+```{r}
+data %>%
+  group_by(Arb_PersonId) %>%
+  slice_head() %>%
+  ungroup() %>%
+  summarise(N_unique_pts = n()) %>%
+  gt::gt()
+```
+
+# Table of demographics and metrics at the first visit with a recorded weight by intervention phase stratified by enrollment (evidence of WPV)
+
+```{r}
+data %<>%
+  mutate(Intervention.factor = factor(Intervention.factor, levels = c("Control", "Intervention"))) %>%
+  mutate(Smoking_Status = fct_na_value_to_level(Smoking_Status, level = "Unknown")) %>%
+  mutate(PHQ2_complete = ifelse(is.na(PHQ2), 0, 1),
+         PHQ2_gt_0 = ifelse(PHQ2 > 0, 1, 0),
+         PHQ9_complete = ifelse(is.na(PHQ9), 0, 1),
+         GAD7_complete = ifelse(is.na(GAD7), 0, 1))
+```
+
+
+
+```{r}
+tab1 <- data %>%
+  filter(IndexVisit == 1) %>%
+  select(Age, Sex, Race_Ethnicity, Insurance, Weight_kgs, BMI,
+        Systolic_blood_pressure, Diastolic_blood_pressure,
+        A1C:TSH, -`Cystatin C`, EOSS,
+        PHQ2, PHQ2_complete, PHQ2_gt_0, PHQ9, PHQ9_complete, GAD7, GAD7_complete, Smoking_Status,
+        Intervention.factor, EE) %>%
+  tbl_strata(
+    strata = EE,
+    .tbl_fun = 
+      ~.x %>%
+      tbl_summary( by = Intervention.factor,
+                  missing = "ifany",
+                  type = list(c(PHQ2, PHQ9, GAD7) ~ 'continuous'),
+
+                  # Temporarily modify statistic to show min and max to check data ranges
+                  # are reasonable
+                  # statistic = list(all_continuous() ~ c("{mean} ({sd}; {min}; {max})")),
+
+                  statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+                  label = list(Age ~ "Age (years)",
+                               Weight_kgs ~ "Weight (kg)",
+                               Race_Ethnicity ~ "Race/Ethnicity",
+                               BMI ~ "BMI (kg/m\U00B2)", # U00B2 will display meters squared
+                               Systolic_blood_pressure ~ "Systolic BP (mmHg)",
+                               Diastolic_blood_pressure ~ "Diastolic BP (mmHg)",
+                               Smoking_Status ~ "Smoking Status"),
+                  digits = list(all_categorical() ~ c(0,1),
+                                  all_continuous() ~ c(1,1))
+      )
+
+  )
+
+ tab1 %>%
+  modify_spanning_header(c("stat_1_1", "stat_2_1") ~ "**ENE**") %>%
+  modify_spanning_header(c("stat_1_2", "stat_2_2") ~ "**EE**") %>%
+  as_gt()
+```
+
+# Table of demographics and metrics at index visits overall
+
+```{r}
+tab1.1 <- data %>%
+  filter(IndexVisit == 1) %>%
+  select(Age, Sex, Race_Ethnicity, Insurance, Weight_kgs, BMI,
+        Systolic_blood_pressure, Diastolic_blood_pressure,
+        A1C:TSH, -`Cystatin C`, EOSS,
+        PHQ2, PHQ2_complete, PHQ2_gt_0, PHQ9, PHQ9_complete, GAD7, GAD7_complete, Smoking_Status) %>%
+
+      tbl_summary(
+                  missing = "ifany",
+                  type = list(c(PHQ2, PHQ9, GAD7) ~ 'continuous'),
+
+                  # Temporarily modify statistic to show min and max to check data ranges
+                  # are reasonable
+                  # statistic = list(all_continuous() ~ c("{mean} ({sd}; {min}; {max})")),
+
+                  statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+                  label = list(Age ~ "Age (years)",
+                               Weight_kgs ~ "Weight (kg)",
+                               Race_Ethnicity ~ "Race/Ethnicity",
+                               BMI ~ "BMI (kg/m\U00B2)", # U00B2 will display meters squared
+                               Systolic_blood_pressure ~ "Systolic BP (mmHg)",
+                               Diastolic_blood_pressure ~ "Diastolic BP (mmHg)",
+                               Smoking_Status ~ "Smoking Status"),
+                  digits = list(all_categorical() ~ c(0,1),
+                                  all_continuous() ~ c(1,1))
+      )
+
+tab1.1 %>%
+  as_gt()
+```
+
+# Table of demographic and health metrics at the first WPV for those who have one
+- Not mutually exclusive groups
+- Comorbidities not captured for these visits
+```{r}
+# Get new index visit
+data %>%
+  filter(WP_Visit == 1) %>%
+  arrange(Arb_PersonId, Intervention.factor, EncounterDate) %>%
+  group_by(Arb_PersonId, Intervention.factor) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(Age, Sex, Race_Ethnicity, Insurance, Weight_kgs, BMI,
+        Systolic_blood_pressure, Diastolic_blood_pressure,
+        # A1C:TSH, -`Cystatin C`, EOSS,
+        PHQ2, PHQ2_complete, PHQ2_gt_0, PHQ9, PHQ9_complete, GAD7, GAD7_complete, Smoking_Status,
+        Intervention.factor) %>%
+  tbl_summary( by = Intervention.factor,
+            missing = "ifany",
+            type = list(c(PHQ2, PHQ9, GAD7) ~ 'continuous'),
+
+            # Temporarily modify statistic to show min and max to check data ranges
+            # are reasonable
+            # statistic = list(all_continuous() ~ c("{mean} ({sd}; {min}; {max})")),
+
+            statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+            label = list(Age ~ "Age (years)",
+                          Weight_kgs ~ "Weight (kg)",
+                          Race_Ethnicity ~ "Race/Ethnicity",
+                          BMI ~ "BMI (kg/m\U00B2)", # U00B2 will display meters squared
+                          Systolic_blood_pressure ~ "Systolic BP (mmHg)",
+                          Diastolic_blood_pressure ~ "Diastolic BP (mmHg)",
+                          Smoking_Status ~ "Smoking Status"),
+            digits = list(all_categorical() ~ c(0,1),
+                            all_continuous() ~ c(1,1))
+)
+
+```
+
+# Table of demographic and health metrics for those with at least one WPV
+- Health metrics taken form first WPV
+```{r}
+data %>%
+  filter(WP_Visit == 1) %>%
+  arrange(Arb_PersonId, EncounterDate) %>%
+  group_by(Arb_PersonId) %>%
+  slice_head() %>%
+  ungroup() %>%
+  select(Age, Sex, Race_Ethnicity, Insurance, Weight_kgs, BMI,
+        Systolic_blood_pressure, Diastolic_blood_pressure,
+        # A1C:TSH, -`Cystatin C`, EOSS,
+        PHQ2, PHQ2_complete, PHQ2_gt_0, PHQ9, PHQ9_complete, GAD7, GAD7_complete, Smoking_Status) %>%
+  tbl_summary(
+            missing = "ifany",
+            type = list(c(PHQ2, PHQ9, GAD7) ~ 'continuous'),
+
+            # Temporarily modify statistic to show min and max to check data ranges
+            # are reasonable
+            # statistic = list(all_continuous() ~ c("{mean} ({sd}; {min}; {max})")),
+
+            statistic = list(all_continuous() ~ c("{mean} ({sd})")),
+            label = list(Age ~ "Age (years)",
+                          Weight_kgs ~ "Weight (kg)",
+                          Race_Ethnicity ~ "Race/Ethnicity",
+                          BMI ~ "BMI (kg/m\U00B2)", # U00B2 will display meters squared
+                          Systolic_blood_pressure ~ "Systolic BP (mmHg)",
+                          Diastolic_blood_pressure ~ "Diastolic BP (mmHg)",
+                          Smoking_Status ~ "Smoking Status"),
+            digits = list(all_categorical() ~ c(0,1),
+                            all_continuous() ~ c(1,1))
+)
+```
