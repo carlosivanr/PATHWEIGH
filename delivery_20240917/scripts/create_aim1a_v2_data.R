@@ -6,7 +6,7 @@
 # Capture the visits from ee and ene patients after eligibility or enrollment
 # criteria are met, dropping all visits without a recorded weight value.
 # Filters for patients that have a subsequent weight value. However it
-# does not consider wether there are subsequen weight values in each phase.
+# does not consider wether there are subsequent weight values in each phase.
 
 # Questions for data structuring
 # Index visits must be on or before 03/16/2024?

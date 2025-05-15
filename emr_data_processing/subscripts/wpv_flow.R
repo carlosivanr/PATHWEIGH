@@ -40,7 +40,7 @@ wpv_flow <- function(temp) {
   # space from 01_create_rdata_image.R
   if (exists("flowsheet_ids") == FALSE) {
     flowsheet_ids <- data.table::fread(
-      here("working_files", "FlowsheetIDs_Obesity_Brief_HPI_PW.csv"),
+      here("emr_data_processing", "working_files", "FlowsheetIDs_Obesity_Brief_HPI_PW.csv"),
       integer64 = "numeric",
       na.strings = c("", "NA")) %>%
       as.data.frame()

@@ -151,6 +151,9 @@ data %<>%
 
 # Logistic regression model
 ```{r}
+
+# Need to add the two exposure variables
+
 lmer_log_data <- 
   data %>% 
   group_by(Arb_PersonId, Intervention) %>%
@@ -538,6 +541,7 @@ data %<>%
          N_months_post_wpv_int_180 =ifelse(N_months_post_wpv_int_180 <= 6, 0, N_months_post_wpv_int_180 - 6),
          N_months_post_pw_180 = ifelse(N_months_post_pw_180 <= 6, 0, N_months_post_pw_180  - 6), )
 ```
+
 
 ```{r}
 data %<>%

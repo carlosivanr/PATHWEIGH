@@ -1,0 +1,390 @@
+---
+title: "EE vs ENE Models: Model 6"
+date: "`r Sys.Date()`"
+
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+    toc: true
+
+execute: 
+  echo: false
+---
+
+```{r}
+# ee vs ene data to answer aim 1
+```
+
+```{r, warning=FALSE, message=FALSE}
+invisible(library(tidyverse))
+library(gtsummary)
+library(magrittr, include.only = "%<>%")
+```
+
+```{r, plot_obs_vs_pred function}
+# Function to plot observed vs fitted values
+
+plot_obs_vs_pred <- function(mod) {
+# Plot the observed and predicted values
+obs_pred <- bind_cols(
+  data,
+  tibble(predicted = predict(mod, data, type = "response"))
+  ) %>%
+  mutate(
+    observed = Weight_dv
+  ) %>%
+  select(
+    Arb_PersonId, 
+    N_months_post_id, 
+    observed, 
+    predicted, 
+    Intervention.factor, 
+    Cohort, 
+    GroupID
+  )
+
+# convert to long
+obs_pred_long <- obs_pred %>%
+  group_by(
+    Arb_PersonId, 
+    N_months_post_id
+  ) %>%
+  pivot_longer(
+    cols = c(observed, predicted), 
+    values_to = "Weight", 
+    names_to = "Type"
+  ) %>%
+  ungroup()
+
+# display plot
+obs_pred_long %>%
+  group_by(N_months_post_id, Type) %>% # We could make the average profile and make 18 months 
+  summarise(
+    avg_weight_kgs = mean(Weight), 
+    .groups = "drop"
+  ) %>%
+  filter(N_months_post_id <= 48) %>%
+  ggplot(
+    aes(x = N_months_post_id, y = avg_weight_kgs, color = Type)
+  ) +
+  geom_point() +
+  geom_line() + 
+  theme(legend.position="bottom")
+}
+```
+
+```{r}
+# Plot the pridected and residual values
+plot_res_vs_pred <- function(mod) {
+
+  # Extract fitted values and residuals
+  # Considers the random effects
+  fitted_vals <- fitted(mod)
+  residuals <- residuals(mod)
+
+  # Basic diagnostic plot
+  plot(fitted_vals, residuals,
+      xlab = "Fitted values",
+      ylab = "Residuals",
+      main = "Residuals vs Fitted")
+  abline(h = 0, col = "red")
+}
+```
+
+
+```{r}  
+# Set the project root
+proj_root <- "D:/PATHWEIGH/"
+
+# Set the data delivery date to the appropriate data set
+delivery <- "20240917"
+
+# Load pp_data for ensuring that the same 9,358 patients are analyzed
+load(
+  str_c(
+    proj_root, 
+    "delivery_", delivery, 
+    "/data/pp_data_", delivery, 
+    ".Rdata"
+  )
+)
+
+# Load visits_post_id to create merge in variables
+load(
+  str_c(
+    proj_root, 
+    "delivery_", delivery, 
+    "/data/visits_post_id_", delivery, 
+    ".Rdata"
+  )
+)
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Load data
+data <- read_csv(
+  "D:\\PATHWEIGH\\delivery_20240917\\data\\aim3_its_data_20240917.csv"
+)
+```
+
+```{r}
+# Convert days to months
+data %<>% 
+  mutate(
+    N_months_post_id_con = N_days_post_id / 30,
+    N_months_post_id_int = N_days_post_int / 30,
+    N_months_post_wpv_con = N_days_post_wpv / 30,
+    N_months_post_wpv_int = N_days_post_wpv_int / 30,
+    N_months_post_pw = N_days_post_pw / 30
+  ) %>% 
+  # Needed for plotting obs vs predicted correctly
+  mutate(N_months_post_id = floor(N_months_post_id_con))
+```
+
+```{r}
+# Create varaibles
+data %<>%
+  mutate(
+    N_months_post_id_con_180 = N_months_post_id_con,
+    N_months_post_id_con_570 = N_months_post_id_con,
+    N_months_post_id_int_180 = N_months_post_id_int,
+    N_months_post_wpv_con_180 = N_months_post_wpv_con,
+    N_months_post_wpv_int_180 = N_months_post_wpv_int,
+    N_months_post_pw_180 = N_months_post_pw
+  ) %>%
+  mutate(
+    N_months_post_id_con_180 = ifelse(N_months_post_id_con <= 6, 0, N_months_post_id_con_180 - 6),
+    N_months_post_id_con_570 = ifelse(N_months_post_id_con <= 19, 0, N_months_post_id_con_570 - 19),
+    N_months_post_id_int_180 = ifelse(N_months_post_id_int_180 <= 6, 0, N_months_post_id_int_180 - 6),
+    N_months_post_wpv_con_180 = ifelse(N_months_post_wpv_con_180 <= 6, 0, N_months_post_wpv_con_180 - 6),
+    N_months_post_wpv_int_180 =ifelse(N_months_post_wpv_int_180 <= 6, 0, N_months_post_wpv_int_180 - 6),
+    N_months_post_pw_180 = ifelse(N_months_post_pw_180 <= 6, 0, N_months_post_pw_180  - 6)
+  )
+
+
+```
+
+
+```{r}
+data %<>%
+  mutate(
+    year0 = ifelse(Year == "Year0", 1, 0),
+    year1 = ifelse(Year == "Year1", 1, 0),
+    year2 = ifelse(Year == "Year2", 1, 0),
+    year3 = ifelse(Year == "Year3", 1, 0),
+    year4 = ifelse(Year == "Year4", 1, 0)
+  )
+```
+
+```{r}
+# Set parameters for digits
+n_digits = 5
+```
+
+## Model 6
+Mixed effects linear regression model with random patient and clinic random/fixed effects including linear function for N_days_post_id, N_days_post_int
+```{r, eval = TRUE, echo = TRUE}
+model_6 <- lmerTest::lmer(
+  Weight_dv ~
+    # age
+    age_45_to_60 + age_gt_60 +
+
+    # sex
+    sex_m +
+
+    # race ethnicity
+    reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+    # Year at the index visit (first visit with a weight)
+    year_at_ind1 + year_at_ind2 + year_at_ind3 +
+      
+    # Time variables
+    N_months_post_id_con + N_months_post_id_con_180 + N_months_post_id_con_570 +
+
+    N_months_post_id_int + N_months_post_id_int_180 + 
+      
+    N_months_post_wpv_con + N_months_post_wpv_con_180 + 
+      
+    N_months_post_wpv_int + N_months_post_wpv_int_180 +
+
+    N_months_post_pw +
+
+
+    (1| Arb_PersonId) + (1|DepartmentExternalName),
+
+  data = data)
+```
+
+```{r, eval = TRUE}
+tbl_regression(model_6, intercept = TRUE, 
+               estimate_fun = purrr::partial(style_ratio, digits = n_digits)) %>%
+  add_glance_table(include = c("nobs", "sigma", "logLik", "AIC", "BIC", "REMLcrit", "df.residual")) %>%
+  as_gt() #%>%
+  # gt::gtsave(., filename = "D:/PATHWEIGH/delivery_20240917/scripts/ee_vs_ene/ee_vs_ene_models/model_6.docx" )
+```
+
+
+## Residual vs predicted/fitted values
+- Predicted/fitted values consider random effects
+```{r}
+plot_res_vs_pred(model_6) 
+```
+
+## QQ Plot
+
+```{r}
+# Extract residuals
+res <- resid(model_6)
+
+# Base R QQ plot
+qqnorm(res)
+qqline(res, col = "red")
+```
+
+
+## Observed vs predicted values
+- Considers the random effects in predictions
+- Individual values averaged within each month
+```{r}
+# Plot observed vs fitted values
+plot_obs_vs_pred(model_6)
+```
+
+```{r}
+# Create a data set for plotting
+obs_pred <- bind_cols(
+  data,
+  tibble(predicted = predict(model_6, data, type = "response"))
+  ) %>%
+  mutate(
+    observed = Weight_dv
+  )
+```
+
+
+```{r}
+# Calculate the n_visits_per_pt per phase
+n_visits_per_pt <- 
+  data %>%
+  group_by(Arb_PersonId, Intervention.factor) %>%
+  count() %>%
+  ungroup() %>%
+  pivot_wider(names_from = Intervention.factor, values_from = n) %>%
+  mutate(across(Control:Intervention, ~ifelse(is.na(.x), 0, .x)))
+```
+
+
+<!-- FUNCTION TO PLOT DIAGNOSTIC PLOTS -->
+```{r}
+# Function to plot obs vs predicted in separate subgroups
+plot_obs_pred_v2 <-  function(data) {
+  data %>%
+  select(
+    Arb_PersonId, 
+    N_months_post_id, 
+    observed, 
+    predicted, 
+    Intervention.factor, 
+    EE, 
+    GroupID
+  ) %>%
+  group_by(
+    Arb_PersonId, 
+    N_months_post_id
+  ) %>%
+  pivot_longer(
+    cols = c(observed, predicted), 
+    values_to = "Weight", 
+    names_to = "Type"
+  ) %>%
+  ungroup() %>%
+  group_by(
+    N_months_post_id, 
+    Type, 
+    EE
+  ) %>%
+  summarise(
+    avg_weight_kgs = mean(Weight),
+    .groups = "drop"
+  ) %>%
+  filter(N_months_post_id <= 48 ) %>%
+  ggplot(
+    aes(x = N_months_post_id, y = avg_weight_kgs, color = Type)
+  ) +
+  geom_point() +
+  geom_line() +
+  facet_wrap( ~ EE) +
+  theme(legend.position="bottom")
+}
+```
+
+
+## Plot of observed vs predicted after averaging by month for those with visits in control only
+- 0 = ENE
+- 1 = EE
+```{r}
+obs_pred %>%
+  filter(
+    Arb_PersonId %in% (n_visits_per_pt %>% filter(Control > 0, Intervention == 0) %>% pull(Arb_PersonId))
+  ) %>%
+  plot_obs_pred_v2()
+```
+
+## Plot of observed vs predicted after averaging by month for those with visits in intervention only
+- 0 = ENE
+- 1 = EE
+```{r}
+obs_pred %>%
+  filter(
+    Arb_PersonId %in% (n_visits_per_pt %>% filter(Control == 0, Intervention > 0) %>% pull(Arb_PersonId))
+  ) %>%
+  plot_obs_pred_v2()
+```
+
+## Plot of observed vs predicted after averaging by month for those with 1 visits in control and  1 visit in intervention
+- 0 = ENE
+- 1 = EE
+* All of these individuals have N_months_post_id value equal to 0, because the have 1 and only 1 visit after their index
+```{r}
+obs_pred %>%
+  filter(
+    Arb_PersonId %in% (n_visits_per_pt %>% filter(Control == 1, Intervention == 1) %>% pull(Arb_PersonId))
+  ) %>% #pull(N_months_post_id) %>% table()
+  # select(N_months_post_id, N_months_post_id_con)
+  plot_obs_pred_v2()
+```
+
+
+## Plot of observed vs predicted after averaging by month for those with 2 or more visits in control and only 1 visit in intervention
+- 0 = ENE
+- 1 = EE
+```{r}
+obs_pred %>%
+  filter(
+    Arb_PersonId %in% (n_visits_per_pt %>% filter(Control >= 2, Intervention == 1) %>% pull(Arb_PersonId))
+  ) %>%
+  plot_obs_pred_v2()
+```
+
+
+## Plot of observed vs predicted after averaging by month for those with 2 or more visits in intervention and only 1 visit in control
+- 0 = ENE
+- 1 = EE
+```{r}
+obs_pred %>%
+  filter(
+    Arb_PersonId %in% (n_visits_per_pt %>% filter(Control == 1, Intervention >= 2) %>% pull(Arb_PersonId))
+  ) %>%
+  plot_obs_pred_v2()
+```
+
+## Plot of observed vs predicted after averaging by month for those with 2 or more visits in intervention and 2 or more visit in control
+- 0 = ENE
+- 1 = EE
+```{r}
+obs_pred %>%
+  filter(
+    Arb_PersonId %in% (n_visits_per_pt %>% filter(Control >= 2, Intervention >= 2) %>% pull(Arb_PersonId))
+  ) %>%
+  plot_obs_pred_v2()
+```

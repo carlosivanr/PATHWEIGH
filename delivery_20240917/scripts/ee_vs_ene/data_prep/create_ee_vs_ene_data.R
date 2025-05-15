@@ -6,13 +6,7 @@
 # Capture the visits from ee and ene patients after eligibility or enrollment
 # criteria are met, dropping all visits without a recorded weight value.
 # Filters for patients that have a subsequent weight value. However it
-# does not consider wether there are subsequen weight values in each phase.
-
-# Questions for data structuring
-# Index visits must be on or before 03/16/2024?
-#   - There are patients where the index date is after 03/16/2024
-# Filter out visits without an NPI? Bc I thought it was ok if NPI not available
-
+# does not consider wether there are subsequent weight values in each phase.
 # *****************************************************************************
 
 # %% Load libraries --------------------------------------------------------------
@@ -62,9 +56,9 @@ source("D:\\PATHWEIGH\\emr_data_processing\\subscripts\\set_index_date_ee_ene.R"
 ee_ene <- set_index_date_ee_ene(visits)
 
 
-## Load processing functions to prep ee_enee data ----
+## Load processing functions to prep ee_ene data ----
 # After the index date is set, prep_ee_ene is re-used from the Aim1 pipeline
-# but requires the subsequent functions to work properly
+# but requires the following functions to work properly
 source("D:\\PATHWEIGH\\emr_data_processing\\subscripts\\prep_ee_ene.R")
 source("D:\\PATHWEIGH\\emr_data_processing\\subscripts\\censor_visits.R")
 source("D:\\PATHWEIGH\\emr_data_processing\\subscripts\\set_last_visit.R")
@@ -347,8 +341,30 @@ n_visits_per_pt %>%
 # -------------------- EE only ------------------------------------------------
 # Pull the EE ids from the visits level to make a time invariant variable at
 # the patient level
+# n.b. This was the version used to tabulate Mark's file, but there is a slight
+# problem with this approach. Eligible and Enrolled are set in the set_ee_ene
+# function. The function sets Eligible to 1, and Enrolled to 1 if the
+# Arb_PersonId is in the ee group of the ee_ene data set prepared in the main
+# data pipeline. However in this new approach, the index dates get shifted to
+# first visit with a weight. When the Index date gets shifted, the sequence of
+# visits from control to intervention can change, which causes the censoring
+# algorithm to exclude some visits. This could happend in a hypothetical 
+# sequence of 1 con (new index), 2 int, 3 con (WPV, old index), 4 con, 5 int.
+# In the previous configurartion, only visits after the index date are
+# retained. So visits 3, and 4 would be retained, and visit 5 would be 
+# censored. In the new configuration, visits 1 and 2, would be retained but
+# visits 3 through 5 would be censored, because anything after a switch from
+# intervention to control is censored (dropped from the data frame).
 ee_ids <- data %>%
   filter(Eligible == 1, Enrolled == 1) %>%
+  select(Arb_PersonId) %>%
+  distinct() %>%
+  pull(Arb_PersonId)
+
+# The new definition 
+ee_ids <- 
+  data %>%
+  filter(WPV > 0) %>%
   select(Arb_PersonId) %>%
   distinct() %>%
   pull(Arb_PersonId)

@@ -1,0 +1,965 @@
+---
+title: "EE vs ENE Models: Model 4a"
+date: "`r Sys.Date()`"
+
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+    toc: true
+
+execute: 
+  echo: false
+---
+
+```{r}
+# ee vs ene data to answer aim 1
+```
+
+```{r, warning=FALSE, message=FALSE}
+invisible(library(tidyverse))
+library(gtsummary)
+library(magrittr, include.only = "%<>%")
+```
+
+```{r, plot_obs_vs_pred function}
+# Function to plot observed vs fitted values
+
+plot_obs_vs_pred <- function(mod) {
+# Plot the observed and predicted values
+obs_pred <- bind_cols(
+  data,
+  tibble(predicted = predict(mod, data, type = "response"))
+  ) %>%
+  mutate(
+    observed = Weight_dv
+  ) %>%
+  select(
+    Arb_PersonId, 
+    N_months_post_id, 
+    observed, 
+    predicted, 
+    Intervention.factor, 
+    Cohort, 
+    GroupID
+  )
+
+# convert to long
+obs_pred_long <- obs_pred %>%
+  group_by(
+    Arb_PersonId, 
+    N_months_post_id
+  ) %>%
+  pivot_longer(
+    cols = c(observed, predicted), 
+    values_to = "Weight", 
+    names_to = "Type"
+  ) %>%
+  ungroup()
+
+# display plot
+obs_pred_long %>%
+  group_by(N_months_post_id, Type) %>% # We could make the average profile and make 18 months 
+  summarise(
+    avg_weight_kgs = mean(Weight), 
+    .groups = "drop"
+  ) %>%
+  filter(N_months_post_id <= 48) %>%
+  ggplot(
+    aes(x = N_months_post_id, y = avg_weight_kgs, color = Type)
+  ) +
+  geom_point() +
+  geom_line() + 
+  theme(legend.position="bottom")
+}
+```
+
+```{r}
+# Plot the pridected and residual values
+plot_res_vs_pred <- function(mod) {
+
+  # Extract fitted values and residuals
+  # Considers the random effects
+  fitted_vals <- fitted(mod)
+  residuals <- residuals(mod)
+
+  # Basic diagnostic plot
+  plot(fitted_vals, residuals,
+      xlab = "Fitted values",
+      ylab = "Residuals",
+      main = "Residuals vs Fitted")
+  abline(h = 0, col = "red")
+}
+```
+```{r}  
+# Set the project root
+proj_root <- "D:/PATHWEIGH/"
+
+# Set the data delivery date to the appropriate data set
+delivery <- "20240917"
+
+# Load pp_data for ensuring that the same 9,358 patients are analyzed
+load(
+  str_c(
+    proj_root, 
+    "delivery_", delivery, 
+    "/data/pp_data_", delivery, 
+    ".Rdata"
+  )
+)
+
+# Load visits_post_id to create merge in variables
+load(
+  str_c(
+    proj_root, 
+    "delivery_", delivery, 
+    "/data/visits_post_id_", delivery, 
+    ".Rdata"
+  )
+)
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Load data
+data <- read_csv(
+  "D:\\PATHWEIGH\\delivery_20240917\\data\\aim3_its_data_20240917.csv"
+)
+```
+
+```{r}
+# Convert days to months
+data %<>% 
+  mutate(
+    N_months_post_id_con = N_days_post_id / 30,
+    N_months_post_id_int = N_days_post_int / 30,
+    N_months_post_wpv_con = N_days_post_wpv / 30,
+    N_months_post_wpv_int = N_days_post_wpv_int / 30,
+    N_months_post_pw = N_days_post_pw / 30
+  ) %>% 
+  # Needed for plotting obs vs predicted correctly
+  mutate(N_months_post_id = floor(N_months_post_id_con))
+```
+
+```{r}
+# Create variables
+data %<>%
+  mutate(
+    N_months_post_id_con_180 = N_months_post_id_con,
+    N_months_post_id_con_540 = N_months_post_id_con,
+    N_months_post_id_int_180 = N_months_post_id_int,
+    N_months_post_wpv_con_180 = N_months_post_wpv_con,
+    N_months_post_wpv_int_180 = N_months_post_wpv_int,
+    N_months_post_pw_180 = N_months_post_pw
+  ) %>%
+  mutate(
+    N_months_post_id_con_180 = ifelse(N_months_post_id_con <= 6, 0, N_months_post_id_con_180 - 6),
+    N_months_post_id_con_540 = ifelse(N_months_post_id_con <= 18, 0, N_months_post_id_con_540 - 18),
+    N_months_post_id_int_180 = ifelse(N_months_post_id_int_180 <= 6, 0, N_months_post_id_int_180 - 6),
+    N_months_post_wpv_con_180 = ifelse(N_months_post_wpv_con_180 <= 6, 0, N_months_post_wpv_con_180 - 6),
+    N_months_post_wpv_int_180 =ifelse(N_months_post_wpv_int_180 <= 6, 0, N_months_post_wpv_int_180 - 6),
+    N_months_post_pw_180 = ifelse(N_months_post_pw_180 <= 6, 0, N_months_post_pw_180  - 6)
+  )
+
+```
+
+
+```{r}
+data %<>%
+  mutate(
+    year0 = ifelse(Year == "Year0", 1, 0),
+    year1 = ifelse(Year == "Year1", 1, 0),
+    year2 = ifelse(Year == "Year2", 1, 0),
+    year3 = ifelse(Year == "Year3", 1, 0),
+    year4 = ifelse(Year == "Year4", 1, 0)
+  )
+```
+
+```{r}
+# Set parameters for digits
+n_digits = 5
+```
+
+## Model 4a
+Mixed effects linear regression model with random patient and clinic random/fixed effects including linear function for N_days_post_id, N_days_post_int
+```{r, eval = TRUE, echo = TRUE}
+model_4a <- lmerTest::lmer(
+  Weight_dv ~
+    # age
+    age_45_to_60 + age_gt_60 +
+
+    # sex
+    sex_m +
+
+    # race ethnicity
+    reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+
+    # Year at the index visit (first visit with a weight)
+    year_at_ind1 + year_at_ind2 + year_at_ind3 +
+      
+    # Time variables
+    N_months_post_id_con + N_months_post_id_con_180 + N_months_post_id_con_540 +
+
+    N_months_post_id_int + N_months_post_id_int_180 +
+
+
+    (1| Arb_PersonId) + (1|DepartmentExternalName),
+
+  data = data)
+```
+
+```{r, eval = TRUE}
+tbl_regression(model_4a, intercept = TRUE, 
+               estimate_fun = purrr::partial(style_ratio, digits = n_digits)) %>%
+  add_glance_table(include = c("nobs", "sigma", "logLik", "AIC", "BIC", "REMLcrit", "df.residual")) %>%
+  as_gt() #%>%
+  # gt::gtsave(., filename = "D:/PATHWEIGH/delivery_20240917/scripts/ee_vs_ene/ee_vs_ene_models/model_4a.docx" )
+```
+
+
+```{r}
+# avg_bl_weight <- data %>%
+#   filter(IndexVisit == 1) %>%
+#   pull(Weight_kgs) %>%
+#   mean() %>%
+#   round(1)
+
+# intercept_weight <- lme4::fixef(model_4a)[1]
+
+# diff_int_avg_weight <- avg_bl_weight - intercept_weight
+```
+
+```{r}
+# # Extract fixed effects coefficients
+# coefs <- lme4::fixef(model_4a)
+
+# # Create a reference profile (all predictors at baseline)
+# x_base <- rep(0, length(coefs))
+# names(x_base) <- names(coefs)
+
+# #  prediction for the control phase at 6 months
+# x_con <- x_base
+# # x_con["(Intercept)"] <- 1  
+# # x_con["N_months_post_id_con"] <- 6
+
+# # drop the intercept
+# new_data <- data.frame(t(x_con)) %>% 
+#   select(-"X.Intercept.") %>%
+#   slice(rep(1, 6)) %>%
+#   mutate(
+#     Arb_PersonId = NA,
+#     DepartmentExternalName = NA,
+#     N_months_post_id_con = rep(c(0, 6, 18), 2),
+#     N_months_post_id_con_180 = rep(c(0, 0, 12), 2),
+#     N_months_post_id_int = c(0, 0, 0, 0, 6, 18),
+#     N_months_post_id_int_180 = c(0, 0, 0, 0, 6, 12)
+#     )
+
+# # Check that
+# predict(model_4a, newdata = new_data, re.form = NA) + diff_int_avg_weight
+
+
+# # Get predictions at this reference point
+# preds <- marginaleffects::predictions(
+#   model_4a, 
+#   newdata = new_data, 
+#   re.form = NA)
+
+# # One prediction
+# pred <- marginaleffects::predictions(
+#   model_4a, 
+#   newdata = marginaleffects::datagrid(
+#     Arb_PersonId = NA,
+#     DepartmentExternalName = NA,
+#     age_45_to_60 = 0,
+#     age_gt_60 = 0,
+#     sex_m = 0,
+#     reth_his = 0,
+#     reth_blk = 0,
+#     reth_asn = 0,
+#     reth_oth = 0,
+#     reth_ukn = 0,
+#     year_at_ind1 = 0,
+#     year_at_ind2 = 0,
+#     year_at_ind3 = 0,
+#     N_months_post_id_con = 6,
+#     N_months_post_id_con_180 = 0,
+#     N_months_post_id_con_540 = 0,
+#     N_months_post_id_int = 0,
+#     N_months_post_id_int_180 = 0
+#   ), 
+#   re.form = NA)
+
+
+
+# preds %>%
+#   as_tibble() %>%
+#   mutate(Time = c(0, 6, 18, 0, 6, 18),
+#          type = c(rep("Usual Care", 3), rep("Intervention", 3))
+#          ) %>%
+#   ggplot(aes(x = Time, y = estimate, ymin = conf.low, ymax = conf.high)) +
+#       geom_ribbon(alpha = .1, fill = "red") +
+#       geom_line() +
+#       ylim(88, 91.5) + 
+#       facet_wrap(~ type)
+
+# preds %>%
+#   as_tibble() %>%
+#   mutate(Time = c(0, 6, 18, 0, 6, 18),
+#          type = c(rep("Usual Care", 3), rep("Intervention", 3)),
+#          lwr = c(0, .26, .15, 0, -0.034, -0.138),
+#          upr = c(0, .32, .21, 0, 0.033, -0.067)
+#          ) %>%
+#   select(Time, estimate, conf.low, conf.high, type, lwr, upr) %>%
+#   group_by(type) %>%
+#   mutate(lag = lag(estimate)) %>%
+#   ungroup() %>%
+#   mutate(
+#     conf.low = lag + lwr, 
+#     conf.high = lag + upr) %>%
+#   ggplot(aes(x = Time, y = estimate, ymin = conf.low, ymax = conf.high, color = type)) +
+#     geom_line() +
+
+#     # geom_ribbon(alpha = .1, fill = "red") +
+#     # ylim(88, 91.5) + 
+#     facet_wrap(~ type)
+
+
+```
+
+```{r}
+# ribbon_data <- 
+#   new_data %>%
+#   mutate(Month = N_months_post_id_con) %>%
+#   bind_cols( preds %>% select(conf.low, conf.high, estimate)) %>%
+#   select(Month, estimate, conf.low, conf.high) %>%
+#   mutate(
+#     value = estimate, + diff_int_avg_weight,
+#     conf.low = conf.low + diff_int_avg_weight,
+#     conf.high = conf.high + diff_int_avg_weight,
+#     type = c(rep("Usual Care", 3), rep("Intervention", 3))
+#   ) %>%
+#     filter(type == "Intervention")
+```
+
+## Residual vs predicted/fitted values
+- Predicted/fitted values consider random effects
+```{r}
+plot_res_vs_pred(model_4a) 
+```
+
+## QQ Plot
+```{r}
+# Extract residuals
+res <- resid(model_4a)
+
+# Base R QQ plot
+qqnorm(res)
+qqline(res, col = "red")
+```
+
+
+## Observed vs predicted values
+- Considers the random effects in predictions
+- Individual values averaged within each month
+```{r}
+# Plot observed vs fitted values
+plot_obs_vs_pred(model_4a)
+```
+
+```{r}
+# Create a data set for plotting
+obs_pred <- bind_cols(
+  data,
+  tibble(predicted = predict(model_4a, data, type = "response"))
+  ) %>%
+  mutate(
+    observed = Weight_dv
+  )
+```
+
+
+```{r}
+# Calculate the n_visits_per_pt per phase
+n_visits_per_pt <- 
+  data %>%
+  group_by(Arb_PersonId, Intervention.factor) %>%
+  count() %>%
+  ungroup() %>%
+  pivot_wider(names_from = Intervention.factor, values_from = n) %>%
+  mutate(across(Control:Intervention, ~ifelse(is.na(.x), 0, .x)))
+```
+
+
+<!-- FUNCTION TO PLOT DIAGNOSTIC PLOTS -->
+```{r}
+# Function to plot obs vs predicted in separate subgroups
+plot_obs_pred_v2 <-  function(data) {
+  data %>%
+  select(
+    Arb_PersonId, 
+    N_months_post_id, 
+    observed, 
+    predicted, 
+    Intervention.factor, 
+    EE, 
+    GroupID
+  ) %>%
+  group_by(
+    Arb_PersonId, 
+    N_months_post_id
+  ) %>%
+  pivot_longer(
+    cols = c(observed, predicted), 
+    values_to = "Weight", 
+    names_to = "Type"
+  ) %>%
+  ungroup() %>%
+  group_by(
+    N_months_post_id, 
+    Type, 
+    EE
+  ) %>%
+  summarise(
+    avg_weight_kgs = mean(Weight),
+    .groups = "drop"
+  ) %>%
+  filter(N_months_post_id <= 48 ) %>%
+  ggplot(
+    aes(x = N_months_post_id, y = avg_weight_kgs, color = Type)
+  ) +
+  geom_point() +
+  geom_line() +
+  facet_wrap( ~ EE) +
+  theme(legend.position="bottom")
+}
+```
+
+
+## Plot of observed vs predicted after averaging by month for those with visits in control only
+- 0 = ENE
+- 1 = EE
+```{r}
+obs_pred %>%
+  filter(
+    Arb_PersonId %in% (n_visits_per_pt %>% filter(Control > 0, Intervention == 0) %>% pull(Arb_PersonId))
+  ) %>%
+  plot_obs_pred_v2()
+```
+
+## Plot of observed vs predicted after averaging by month for those with visits in intervention only
+- 0 = ENE
+- 1 = EE
+```{r}
+obs_pred %>%
+  filter(
+    Arb_PersonId %in% (n_visits_per_pt %>% filter(Control == 0, Intervention > 0) %>% pull(Arb_PersonId))
+  ) %>%
+  plot_obs_pred_v2()
+```
+
+## Plot of observed vs predicted after averaging by month for those with 1 visits in control and  1 visit in intervention
+- 0 = ENE
+- 1 = EE
+* All of these individuals have N_months_post_id value equal to 0, because the have 1 and only 1 visit after their index
+```{r}
+obs_pred %>%
+  filter(
+    Arb_PersonId %in% (n_visits_per_pt %>% filter(Control == 1, Intervention == 1) %>% pull(Arb_PersonId))
+  ) %>% #pull(N_months_post_id) %>% table()
+  # select(N_months_post_id, N_months_post_id_con)
+  plot_obs_pred_v2()
+```
+
+
+## Plot of observed vs predicted after averaging by month for those with 2 or more visits in control and only 1 visit in intervention
+- 0 = ENE
+- 1 = EE
+```{r}
+obs_pred %>%
+  filter(
+    Arb_PersonId %in% (n_visits_per_pt %>% filter(Control >= 2, Intervention == 1) %>% pull(Arb_PersonId))
+  ) %>%
+  plot_obs_pred_v2()
+```
+
+
+## Plot of observed vs predicted after averaging by month for those with 2 or more visits in intervention and only 1 visit in control
+- 0 = ENE
+- 1 = EE
+```{r}
+obs_pred %>%
+  filter(
+    Arb_PersonId %in% (n_visits_per_pt %>% filter(Control == 1, Intervention >= 2) %>% pull(Arb_PersonId))
+  ) %>%
+  plot_obs_pred_v2()
+```
+
+## Plot of observed vs predicted after averaging by month for those with 2 or more visits in intervention and 2 or more visit in control
+- 0 = ENE
+- 1 = EE
+```{r}
+obs_pred %>%
+  filter(
+    Arb_PersonId %in% (n_visits_per_pt %>% filter(Control >= 2, Intervention >= 2) %>% pull(Arb_PersonId))
+  ) %>%
+  plot_obs_pred_v2()
+```
+
+
+# Confidence intervals
+```{r, echo = TRUE, eval = FALSE}
+# Fit the model (same as before)
+# mod <- lmer(weight ~ time + (1 | subject), data = df)
+model_4a <- lmerTest::lmer(
+  Weight_dv ~
+    age_45_to_60 + age_gt_60 +
+    sex_m +
+    reth_his + reth_blk + reth_asn + reth_oth + reth_ukn +
+    year_at_ind1 + year_at_ind2 + year_at_ind3 + 
+    N_months_post_id_con + N_months_post_id_con_180 + N_months_post_id_con_540 +
+    N_months_post_id_int + N_months_post_id_int_180 +
+    (1| Arb_PersonId) + (1|DepartmentExternalName),
+  data = data)
+```
+
+```{r}
+  # Requires a vector of 8 values for values for each
+  # Reference and Contrast
+  # N_months_post_id_con
+  # N_months_post_id_con_180
+  # N_months_post_id_int
+  # N_months_post_id_int_180
+```
+
+```{r}
+compute_estimated_change <- function(model, input_vector) {
+
+  # Extract fixed effects coefficients
+  coefs <- lme4::fixef(model)
+  
+  # Create a reference profile (all predictors at baseline)
+  x_base <- rep(0, length(coefs))
+  names(x_base) <- names(coefs)
+  
+  #  prediction
+  x_con <- x_base
+  x_con["(Intercept)"] <- 1  
+  x_con["N_months_post_id_con"] <- input_vector[1]
+  x_con["N_months_post_id_con_180"] <- input_vector[2]
+  x_con["N_months_post_id_con_540"] <- 0
+  x_con["N_months_post_id_int"] <- input_vector[3]
+  x_con["N_months_post_id_int_180"] <- input_vector[4]
+
+  #  prediction
+  x_ref <- x_base
+  x_ref["(Intercept)"] <- 1
+  x_ref["N_months_post_id_con"] <- input_vector[5]
+  x_ref["N_months_post_id_con_180"] <- input_vector[6]
+  x_ref["N_months_post_id_con_540"] <- 0
+  x_ref["N_months_post_id_int"] <- input_vector[7]
+  x_ref["N_months_post_id_int_180"] <- input_vector[8]
+
+
+  # Compute predicted values
+  pred_ref <- sum(coefs * x_ref)  
+  pred_con <- sum(coefs * x_con)  
+  
+  # Compute estimated change
+  contrast_vec <- x_con - x_ref
+  est_change <- sum(coefs * contrast_vec)
+  
+  # Standard error of the change
+  vcov_mat <- vcov(model)
+  se_change <- sqrt(t(contrast_vec) %*% vcov_mat %*% contrast_vec)
+  
+  # 95% Confidence Interval
+  lower <- est_change - 1.96 * se_change
+  upper <- est_change + 1.96 * se_change
+  
+  t_stat <- est_change / se_change[1]
+
+  p_value <- 2 * (1 - pnorm(abs(t_stat)))  # Two-tailed test
+
+  # Return results in a formatted table
+  result <- data.frame(
+    pred_ref = pred_ref,
+    pred_con = pred_con,
+    est_change = est_change,
+    se = as.numeric(se_change),
+    lwr = as.numeric(lower),
+    upr = as.numeric(upper),
+    p = p_value
+  ) %>%
+    gt::gt() %>%
+    gt::fmt_number(
+      columns = everything(),
+      decimals = 4
+    )
+  
+  return(result)
+}
+```
+
+## Predicted average weight from 0-6 months in usual care
+```{r}
+# Someone at 6 months would have N_months_post_id_con, and all other t variables set to 0
+# Someone at 0 months would have all t variables set to 0
+input_vector <- c(6, 0, 0, 0, 0, 0, 0, 0)  # Modify as needed
+compute_estimated_change(model_4a, input_vector)
+```
+
+## Predicted average weight from 6-18 months in usual care
+```{r}
+# Example usage:
+input_vector <- c(18, 12, 0, 0, 6, 0, 0, 0)  # Modify as needed
+compute_estimated_change(model_4a, input_vector)
+```
+
+## Predicted average weight from 0-18 months in usual care
+```{r}
+# Example usage:
+input_vector <- c(18, 12, 0, 0, 0, 0, 0, 0)  # Modify as needed
+compute_estimated_change(model_4a, input_vector)
+```
+
+<!--///////////////////// INTERVENTION ///////////////////// -->
+
+## Predicted average weight from 0-6 months in intervention
+```{r}
+# Example usage:
+input_vector <- c(6, 0, 6, 0, 0, 0, 0, 0)  # Modify as needed
+compute_estimated_change(model_4a, input_vector)
+```
+
+## Predicted average weight from 6-18 months in intervention
+```{r}
+# Example usage:
+input_vector <- c(18, 12, 18, 12, 6, 0, 6, 0)  # Modify as needed
+compute_estimated_change(model_4a, input_vector)
+```
+
+```{r eval = FALSE}
+  # Extract fixed effects coefficients
+  coefs <- lme4::fixef(model_4a)
+  
+  # Create a reference profile (all predictors at baseline)
+  x_base <- rep(0, length(coefs))
+  names(x_base) <- names(coefs)
+  
+  #  prediction
+  x_con <- x_base
+  x_con["(Intercept)"] <- 1  
+  x_con["N_months_post_id_con"] <- 6
+  x_con["N_months_post_id_con_180"] <- 0
+  x_con["N_months_post_id_con_540"] <- 0 # Not an arg
+  x_con["N_months_post_id_int"] <- 6
+  x_con["N_months_post_id_int_180"] <- 0
+
+  #  prediction
+  x_ref <- x_base
+  x_ref["(Intercept)"] <- 1
+  x_ref["N_months_post_id_con"] <- 18
+  x_ref["N_months_post_id_con_180"] <- 12
+  x_ref["N_months_post_id_con_540"] <- 0 # Not an arg
+  x_ref["N_months_post_id_int"] <- 18
+  x_ref["N_months_post_id_int_180"] <- 12
+
+
+  # Compute predicted values
+  pred_ref <- sum(coefs * x_ref)  
+  pred_con <- sum(coefs * x_con)  
+  
+  # Compute estimated change
+  contrast_vec <- x_con - x_ref
+  est_change <- sum(coefs * contrast_vec)
+  
+  # Standard error of the change
+  vcov_mat <- vcov(model_4a)
+  se_change <- sqrt(t(contrast_vec) %*% vcov_mat %*% contrast_vec)
+  
+  # 95% Confidence Interval
+  lower <- est_change - 1.96 * se_change
+  upper <- est_change + 1.96 * se_change
+```
+
+## Predicted average weight from 0-18 months in intervention
+```{r}
+# Example usage:
+input_vector <- c(18, 12, 18, 12, 0, 0, 0, 0)  # Modify as needed
+compute_estimated_change(model_4a, input_vector)
+```
+
+## CI for the difference at 6months between intervention and usual care
+```{r, echo = TRUE}
+# lmerTest::contest(model_4a, c(0,0,0,0,0,0,0,0,0,0,0,0,6,0,0,-6,0), joint = FALSE, confint = TRUE) %>% 
+#   gt::gt()
+
+# THIS IS THE CORRECT APPROACH
+# Because emmeans ran out of memory
+# Get fixed effects from the model
+coefs <- lme4::fixef(model_4a)
+
+# Create a reference profile
+x_base <- rep(0, length(coefs))
+names(x_base) <- names(coefs)
+
+# Prediction at 6 months in control (N_months_post_id_con = 6)
+x_con <- x_base
+x_con["(Intercept)"] <- 1
+x_con["N_months_post_id_con"] <- 6
+x_con["N_months_post_id_con_180"] <- 0
+
+
+# Prediction at 6 months in intervention (N_months_post_id_int = 6)
+x_int <- x_base
+x_int["(Intercept)"] <- 1
+x_int["N_months_post_id_con"] <- 6
+x_int["N_months_post_id_int"] <- 6
+
+# Compute predicted values (fixed effects only)
+pred_con <- sum(coefs * x_con)
+pred_int <- sum(coefs * x_int)
+
+# Difference
+# delta <- pred_int - pred_con
+
+vcov_mat <- vcov(model_4a)
+
+# Create contrast vector
+contrast_vec <- x_int - x_con
+
+# Estimate and standard error
+est_diff <- sum(coefs * contrast_vec)
+se_diff <- sqrt(t(contrast_vec) %*% vcov_mat %*% contrast_vec)
+
+# Compute t-statistic
+t_stat <- (est_diff / se_diff)[1]
+
+# Approximate p-value using normal distribution
+p_value <- 2 * (1 - pnorm(abs(t_stat)))  # Two-tailed test
+
+
+# 95% CI
+lower <- est_diff - 1.96 * se_diff
+upper <- est_diff + 1.96 * se_diff
+
+
+data.frame(
+  month = 6,
+  pred_con = pred_con,
+  pred_int = pred_int,
+  diff = est_diff,
+  se = as.numeric(se_diff),
+  lwr = as.numeric(lower),
+  upr = as.numeric(upper),
+  p = p_value) %>%
+gt::gt() %>%
+gt::fmt_number(
+columns = everything(),
+decimals = 2  # Use `decimals` for fixed decimal places
+)
+```
+
+
+## CI for the difference at 6-18 months between intervention and usual care
+```{r}
+coefs <- lme4::fixef(model_4a)
+
+# Create a reference profile
+x_base <- rep(0, length(coefs))
+names(x_base) <- names(coefs)
+
+# Pre and post in control -----------------------------------------------------
+x_con_pre <- x_base
+x_con_pre["(Intercept)"] <- 1
+x_con_pre["N_months_post_id_con"] <- 6
+x_con_pre["N_months_post_id_con_180"] <- 0
+x_con_pre["N_months_post_id_int"] <- 0
+x_con_pre["N_months_post_id_int_180"] <- 0
+
+x_con <- x_base
+x_con["(Intercept)"] <- 1
+x_con["N_months_post_id_con"] <- 18
+x_con["N_months_post_id_con_180"] <- 12
+x_con["N_months_post_id_int"] <- 0
+x_con["N_months_post_id_int_180"] <- 0
+
+
+# Pre and post in intervention ------------------------------------------------
+x_int_pre <- x_base
+x_int_pre["(Intercept)"] <- 1
+x_int_pre["N_months_post_id_con"] <- 6
+x_int_pre["N_months_post_id_con_180"] <- 0
+x_int_pre["N_months_post_id_int"] <- 6
+x_int_pre["N_months_post_id_int_180"] <- 0
+
+
+# Prediction
+x_int <- x_base
+x_int["(Intercept)"] <- 1
+x_int["N_months_post_id_con"] <- 18
+x_int["N_months_post_id_con_180"] <- 12
+x_int["N_months_post_id_int"] <- 18
+x_int["N_months_post_id_int_180"] <- 12
+
+# Predictions for pre-treatment
+pred_con_pre <- sum(coefs * x_con_pre)
+pred_int_pre <- sum(coefs * x_int_pre)
+
+# Predictions for post-treatment (already defined)
+pred_con_post <- sum(coefs * x_con)
+pred_int_post <- sum(coefs * x_int)
+
+# Compute differences within each group
+diff_con <- pred_con_post - pred_con_pre  # Change for control
+diff_int <- pred_int_post - pred_int_pre  # Change for intervention
+
+# Compute difference-in-differences estimate
+DiD <- diff_int - diff_con
+
+# Variance-covariance matrix
+vcov_mat <- vcov(model_4a)
+
+# Create contrast vector for DiD
+contrast_vec_did <- (x_int - x_int_pre) - (x_con - x_con_pre)
+
+# Compute standard error for DiD estimate
+se_did <- sqrt(t(contrast_vec_did) %*% vcov_mat %*% contrast_vec_did)
+
+# 95% Confidence Interval
+lower_did <- DiD - 1.96 * se_did
+upper_did <- DiD + 1.96 * se_did
+
+# Compute t-statistic
+t_stat <- (DiD / se_did)[1]
+
+# Approximate p-value using normal distribution
+p_value <- 2 * (1 - pnorm(abs(t_stat)))  # Two-tailed test
+
+
+data.frame(
+  diff_con = diff_con,
+  diff_int = diff_int,
+  DiD = DiD,
+  se = as.numeric(se_did),
+  lwr = as.numeric(lower_did),
+  upr = as.numeric(upper_did),
+  p = p_value) %>%
+gt::gt() %>%
+gt::fmt_number(
+columns = everything(),
+decimals = 2  # Use `decimals` for fixed decimal places
+)
+```
+
+## CI for the difference at 18months between intervention and usual care
+```{r, echo = TRUE}
+# and then the difference at 18m using 
+# lmerTest::contest(model_4a, c(1,0,0,0,0,0,0,0,0,0,0,0,18,12,0,-18,-12), joint = FALSE, confint = TRUE)
+
+# Get fixed effects from the model
+coefs <- lme4::fixef(model_4a)
+
+# Create a reference profile
+x_base <- rep(0, length(coefs))
+names(x_base) <- names(coefs)
+
+# Prediction at 18 months in control (N_months_post_id_con = 18)
+x_con <- x_base
+x_con["(Intercept)"] <- 1
+x_con["N_months_post_id_con"] <- 18
+x_con["N_months_post_id_con_180"] <- 12
+
+# Prediction at 18 months in intervention (N_months_post_id_int = 18)
+x_int <- x_base
+x_int["(Intercept)"] <- 1
+x_int["N_months_post_id_con"] <- 18
+x_int["N_months_post_id_con_180"] <- 12
+x_int["N_months_post_id_int"] <- 18
+x_int["N_months_post_id_int_180"] <- 12
+
+# Compute predicted values (fixed effects only)
+pred_con <- sum(coefs * x_con)
+pred_int <- sum(coefs * x_int)
+
+# Difference
+# delta <- pred_int - pred_con
+
+vcov_mat <- vcov(model_4a)
+
+# Create contrast vector
+contrast_vec <- x_int - x_con
+
+# Estimate and standard error
+est_diff <- sum(coefs * contrast_vec)
+se_diff <- sqrt(t(contrast_vec) %*% vcov_mat %*% contrast_vec)
+
+# 95% CI
+lower <- est_diff - 1.96 * se_diff
+upper <- est_diff + 1.96 * se_diff
+
+
+data.frame(
+  month = 18,
+  pred_con = pred_con,
+  pred_int = pred_int,
+  diff = est_diff,
+  se = as.numeric(se_diff),
+  lwr = as.numeric(lower),
+  upr = as.numeric(upper) ) %>%
+gt::gt() %>%
+gt::fmt_number(
+columns = everything(),
+decimals = 2  # Use `decimals` for fixed decimal places
+)
+```
+
+
+# Figure
+```{r}
+# Read the 
+fig_data <- 
+  readxl::read_excel("D:\\PATHWEIGH\\delivery_20240917\\scripts\\ee_vs_ene\\ee_vs_ene_models\\figure_data.xlsx", sheet = "model_4a")
+```
+
+```{r}
+options(pillar.sigfig = 6)
+
+ribbon_data <- fig_data %>%
+  filter(Month %in% c(0, 6, 18)) %>%
+  pivot_longer(cols = -Month, names_to = "type", values_to = "value") %>%
+  arrange(desc(type)) %>%
+
+  # Get the values from the CI tables, manual input
+  mutate(
+    estimated_change = c(0, 0.29, 0.18, 0, -0.0005, -0.103),
+    lwr = c(0, 0.26, 0.15, 0, -0.034, -0.138),
+    upr = c(0, 0.32, 0.21, 0, 0.033, -0.067),
+  ) %>%
+  # to modify the CI at month 0 Commented out because the CIs are very large
+  # mutate(
+  #   across(lwr:upr, ~ ifelse(Month == 0, NA, .x))
+  # ) %>%
+  # group_by(type) %>%
+  # fill(lwr:upr, .direction = "updown") %>%
+  # ungroup() %>%
+  mutate(
+    start = value - estimated_change,
+    # conf.low = value - (estimated_change - lwr),
+    # conf.high = value + (upr - lwr)
+    conf.low = start + lwr,
+    conf.high = start + upr
+  ) #%>%
+  # mutate(
+  #   conf.low = ifelse(Month == 0 & type == "Usual Care", start - lwr, conf.low),
+  #   conf.high = ifelse(Month == 0 & type == "Usual Care", start + upr, conf.high),
+  # )
+```
+
+```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
+fig_data %>%
+  pivot_longer(cols = -Month, names_to = "type", values_to = "value") %>%
+  ggplot(aes(x = Month, y = value, color = type)) +
+  geom_line() +
+  geom_ribbon(data = ribbon_data, aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, linetype = "dashed") +
+  facet_wrap(~ type)
+```

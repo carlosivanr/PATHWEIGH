@@ -5,7 +5,7 @@
 
 # Create the visits data frame by filtering encounters within a designated date
 # range and joining encounter, patient, and clinic tables
-clinic <- readRDS(here("working_files", "clinic.rds"))
+clinic <- readRDS(here("emr_data_processing", "working_files", "clinic.rds"))
 visits <- encounter %>%
   filter(EncounterDate >= date_min, 
          EncounterDate <= date_max) %>%

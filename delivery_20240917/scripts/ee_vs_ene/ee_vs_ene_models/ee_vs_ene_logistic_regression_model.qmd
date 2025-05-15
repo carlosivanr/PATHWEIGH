@@ -1,0 +1,446 @@
+---
+title: "EE vs ENE Models: Logistic Regression (gee, exchangeable)"
+date: "`r Sys.Date()`"
+
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+    toc: true
+
+execute: 
+  echo: false
+---
+
+```{r}
+# ee vs ene data to answer aim 1
+```
+
+```{r, warning=FALSE, message=FALSE}
+invisible(library(tidyverse))
+library(gtsummary)
+library(magrittr, include.only = "%<>%")
+library(yardstick)
+library(pROC)  # for AUC
+
+```
+
+```{r}  
+# Set the project root
+proj_root <- "D:/PATHWEIGH/"
+
+# Set the data delivery date to the appropriate data set
+delivery <- "20240917"
+
+# Load pp_data for ensuring that the same 9,358 patients are analyzed
+load(str_c(proj_root, "delivery_", delivery, "/data/pp_data_", delivery, ".Rdata"))
+
+# Load visits_post_id to create merge in variables
+load(str_c(proj_root, "delivery_", delivery, "/data/visits_post_id_", delivery, ".Rdata"))
+
+# Load pp_mod_data for merging in variables
+# load(str_c(proj_root, "delivery_", delivery, "/data/pp_mod_data_", delivery, ".Rdata"))
+
+# Save a copy as data so that it can be used as an input to other code chunks
+# data <- pp_data
+
+# Load comorbidity names for tables
+# comorbidity_names <- readRDS(str_c(proj_root, "delivery_", delivery, "/data/comorbidity_names_", delivery, ".RDS"))
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Load data
+# Set Cystatin C column to for importing as double, otherwise there may be too
+# many NAs in the first x rows where read_csv() decides what column to assign.
+# It may then assign first as logical, but then encounters a problem when it
+# finally encounters a numeric value.
+data <- read_csv("D:\\PATHWEIGH\\delivery_20240917\\data\\aim3_its_data_20240917.csv")
+```
+
+```{r}
+# Convert days to months
+data %<>% 
+  mutate(N_months_post_id_con = N_days_post_id / 30,
+         N_months_post_id_int = N_days_post_int / 30,
+         N_months_post_wpv_con = N_days_post_wpv / 30,
+         N_months_post_wpv_int = N_days_post_wpv_int / 30,
+         N_months_post_pw = N_days_post_pw / 30)
+```
+
+# Logistic regression model
+```{r}
+lr_data <- 
+  data %>% 
+  group_by(Arb_PersonId, Intervention) %>%
+  arrange(EncounterDate) %>%
+  slice_head() %>%
+  ungroup()
+
+# Need to add the exposure variable. At this point, there should only be at
+# most two rows per patient. If two, one for control and one for intervention
+# otherwise it's just the one of the control or intervention
+lr_data <- 
+    lr_data %>%
+        # select(Cohort, Intervention.factor) %>%
+        mutate(exposure = ifelse(Intervention.factor == "Control" & Cohort == "Cohort1", 12.13333, NA)) %>%
+        mutate(exposure = ifelse(Intervention.factor == "Control" & Cohort == "Cohort2", 24.3, exposure)) %>%
+        mutate(exposure = ifelse(Intervention.factor == "Control" & Cohort == "Cohort3", 36.46667, exposure)) %>% 
+        mutate(exposure = ifelse(Intervention.factor == "Intervention" & Cohort == "Cohort1", 36.46667, exposure)) %>%
+        mutate(exposure = ifelse(Intervention.factor == "Intervention" & Cohort == "Cohort2", 24.3, exposure)) %>%
+        mutate(exposure = ifelse(Intervention.factor == "Intervention" & Cohort == "Cohort3", 12.16667, exposure))
+
+
+
+lr_data <- 
+    lr_data %>%
+    mutate(Race_Ethnicity = factor(Race_Ethnicity, 
+                                            levels = c("Non-Hispanic White", 
+                                                    "Asian", 
+                                                    "Black or African American", 
+                                                    "Hispanic or Latino", 
+                                                    "Other", 
+                                                    "Unknown")),
+                    Age_cat =  factor(Age_cat, levels = c("45-60", "<=45", ">60"))
+    )
+```
+
+```{r}
+# Tabulate the number of visits in each phase for each patient to identify
+# those that have visits in the control phase only
+n_visits_per_pt <- 
+  data %>%
+  group_by(Arb_PersonId, Intervention.factor) %>%
+  count() %>%
+  ungroup() %>%
+  pivot_wider(names_from = Intervention.factor, values_from = n) %>%
+  mutate(across(Control:Intervention, ~ifelse(is.na(.x), 0, .x)))
+```
+
+```{r}
+# patients only in control
+pts_in_con_only <- 
+  n_visits_per_pt %>%
+  filter(Control > 0, Intervention == 0) %>%
+  pull(Arb_PersonId)
+```
+
+```{r}
+# Create a binary indicator of people who have visits in control phase only
+lr_data %<>%
+  mutate(Visits_in_con_only = ifelse(Arb_PersonId %in% pts_in_con_only, 1, 0))
+```
+
+```{r}
+#| echo: true
+# Binary indicator for patients who only have visits in the intervention phase
+# tictoc::tic()
+
+gee_mod <- geepack::geeglm(
+    EE ~ Age_cat + 
+      Sex + 
+      Race_Ethnicity + 
+      Year_at_ind + 
+      Weight_bl + 
+      Intervention + 
+      # Index_int + 
+      # Visits_in_con_only +
+      Cohort,
+      family = "binomial",
+      id = Arb_PersonId, 
+      corstr = "exchangeable",
+      data = lr_data)
+
+# tictoc::toc()
+```
+
+## Exponentiated parameter estimates (ORs)
+```{r}
+tbl_regression(gee_mod, intercept = TRUE, exponentiate = TRUE) %>%
+    add_glance_table(include = c("df.residual", "n.clusters", "max.cluster.size", "alpha", "gamma")) %>%
+  as_gt() #%>%
+  # gt::gtsave(., filename = "D:/PATHWEIGH/delivery_20240917/scripts/ee_vs_ene/ee_vs_ene_gee_model.docx" )
+```
+
+## Unexponentiated parameter estimates(log-odds)
+```{r}
+tbl_regression(gee_mod, intercept = TRUE, exponentiate = FALSE) %>%
+    add_glance_table(include = c("df.residual", "n.clusters", "max.cluster.size", "alpha", "gamma")) %>%
+  as_gt() 
+```
+
+## QIC
+
+```{r}
+qic_values <- geepack::QIC(gee_mod) 
+
+# Convert to a data frame
+qic_df <- data.frame(
+  metric = names(qic_values),
+  value = as.numeric(qic_values),
+  row.names = NULL
+)
+
+# display result
+qic_df %>% gt::gt()
+```
+
+## F1 Score
+
+```{r}
+preds <- predict(gee_mod, type = "response")  # Gives predicted probabilities
+pred_class <- ifelse(preds > 0.5, 1, 0)
+
+truth <- gee_mod$y
+```
+
+```{r}
+data.frame(truth = as.factor(truth), estimate = as.factor(pred_class)) %>%
+  f_meas(truth = truth, estimate = estimate) %>%
+  gt::gt()
+```
+
+## VIF
+
+```{r}
+#| echo: true
+glm_mod <- glm(
+    EE ~ Age_cat + 
+      Sex + 
+      Race_Ethnicity + 
+      Year_at_ind + 
+      Weight_bl + 
+      Intervention + 
+      Index_int + 
+      Visits_in_con_only +
+      exposure,
+      family = "binomial",
+      data = lr_data)
+```
+
+
+```{r}
+#| echo: true
+car::vif(glm_mod) %>% 
+  as.data.frame() %>%
+  gt::gt()
+```
+
+## 3-fold cross validation
+```{r}
+set.seed(123)
+# Step 1: Create cluster-wise folds
+clusters <- unique(lr_data$Arb_PersonId)
+folds <- cut(seq_along(clusters), breaks = 3, labels = FALSE)
+fold_assignments <- data.frame(id = clusters, fold = sample(folds))
+
+# Step 2: Initialize storage
+all_preds <- all_obs <- NULL
+
+# Step 3: Cross-validation loop
+for (k in 1:3) {
+  test_ids <- fold_assignments$id[fold_assignments$fold == k]
+  train_ids <- setdiff(clusters, test_ids)
+  
+  train_data <- lr_data %>% filter(Arb_PersonId %in% train_ids)
+  test_data  <- lr_data %>% filter(Arb_PersonId %in% test_ids)
+  
+  model <- geepack::geeglm(
+    EE ~ Age_cat + 
+      Sex + 
+      Race_Ethnicity + 
+      Year_at_ind + 
+      Weight_bl + 
+      Intervention + 
+      # Index_int + 
+      # Visits_in_con_only +
+      exposure,
+    family = "binomial",
+    id = Arb_PersonId,
+    data = train_data,
+    corstr ="exchangeable")
+
+  
+  test_probs <- predict(model, newdata = test_data, type = "response")
+  
+  all_preds <- c(all_preds, test_probs)
+  all_obs   <- c(all_obs, test_data$EE)
+}
+
+# Step 4: Compute AUC
+auc_result <- roc(all_obs, all_preds)
+print(auc_result$auc)
+
+```
+
+## Plot of mean predictions vs observed means across deciles of predicted values
+```{r}
+
+# Get the predicted values by using the predict() function and the model
+lr_data$predicted <- predict(gee_mod, type = "response")
+
+# After getting the predicted values, get the deciles
+lr_data$decile <- ntile(lr_data$predicted, 10)
+
+# Summarize observed and predicted values by deciles
+# Group by deciles and then get the means of the observed
+# and predicted values
+calibration_df <- lr_data %>%
+  group_by(decile) %>%
+  summarise(
+    mean_predicted = mean(predicted),
+    mean_observed = mean(EE),
+    n = n()
+  )
+```
+
+
+```{r}
+ggplot(calibration_df, aes(x = mean_predicted, y = mean_observed)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+  labs(x = "Mean observed outcome", y = "Mean predicted probability")
+```
+
+
+
+
+<!-- Additional models in sub groups -->
+```{r}
+# Those observed in both usual care and intervention
+# Those observed in only usual care or intervention.
+```
+
+
+```{r}
+# Count number of visits per phase
+# Tabulate the number of visits in each phase for each patient
+n_visits_per_pt <- 
+  data %>%
+  group_by(Arb_PersonId, Intervention.factor) %>%
+  count() %>%
+  ungroup() %>%
+  pivot_wider(names_from = Intervention.factor, values_from = n) %>%
+  mutate(across(Control:Intervention, ~ifelse(is.na(.x), 0, .x)))
+```
+
+```{r}
+# Retrieve the ids of patients in each group
+# 1) visits in control only, 
+# 2) visits in intervention only,
+# 3) visits in both
+visits_in_both <- 
+  n_visits_per_pt %>%
+    filter(Control > 0, Intervention > 0) %>%
+    pull(Arb_PersonId)
+
+visits_in_con <- 
+  n_visits_per_pt %>%
+    filter(Control > 0, Intervention == 0) %>%
+    pull(Arb_PersonId)
+
+visits_in_int <- 
+  n_visits_per_pt %>%
+    filter(Control == 0, Intervention > 0) %>%
+    pull(Arb_PersonId)
+
+# Identify the first visits
+first_visit_ids <- data %>%
+  arrange(Arb_PersonId, Intervention.factor, EncounterDate) %>%
+  group_by(Arb_PersonId, Intervention.factor) %>%
+  slice_head() %>%
+  pull(Arb_EncounterId)
+
+
+# Create new variables
+data <- 
+  data %>%
+    mutate(group = ifelse(Arb_PersonId %in% visits_in_con, "con", NA)) %>%
+    mutate(group = ifelse(Arb_PersonId %in% visits_in_int, "int", group)) %>%
+    mutate(group = ifelse(Arb_PersonId %in% visits_in_both, "both", group)) %>%
+    mutate(first_visit = ifelse(Arb_EncounterId %in% first_visit_ids, 1, 0))
+```
+
+# Logistic regression model in those observed in both usual care and intervention
+
+```{r}
+both_data <- lr_data %>%
+  filter(Arb_PersonId %in% (data %>%
+                              filter(group == "both") %>%
+                              pull(Arb_PersonId))
+  )
+```
+
+
+```{r}
+#| echo: true
+gee_mod <- geepack::geeglm(
+    EE ~ Age_cat + 
+      Sex + 
+      Race_Ethnicity + 
+      Year_at_ind + 
+      Weight_bl + 
+      Intervention + 
+      # Index_int + 
+      # Visits_in_con_only +
+      Cohort,
+      family = "binomial",
+      id = Arb_PersonId, 
+      corstr = "exchangeable",
+      data = both_data)
+```
+
+## Exponentiated parameter estimates (ORs)
+```{r}
+tbl_regression(gee_mod, intercept = TRUE, exponentiate = TRUE) %>%
+    add_glance_table(include = c("df.residual", "n.clusters", "max.cluster.size", "alpha", "gamma")) %>%
+  as_gt()
+```
+
+## Unexponentiated parameter estimates(log-odds)
+```{r}
+tbl_regression(gee_mod, intercept = TRUE, exponentiate = FALSE) %>%
+    add_glance_table(include = c("df.residual", "n.clusters", "max.cluster.size", "alpha", "gamma")) %>%
+  as_gt() 
+```
+
+# Logistic regression model in those observed in control or intervention
+
+```{r}
+not_both_data <- lr_data %>%
+  filter(Arb_PersonId %in% (data %>%
+                              filter(group != "both") %>%
+                              pull(Arb_PersonId))
+  )
+```
+
+
+```{r}
+#| echo: true
+gee_mod <- geepack::geeglm(
+    EE ~ Age_cat + 
+      Sex + 
+      Race_Ethnicity + 
+      Year_at_ind + 
+      Weight_bl + 
+      Intervention + 
+      # Index_int + 
+      # Visits_in_con_only +
+      Cohort,
+      family = "binomial",
+      id = Arb_PersonId, 
+      corstr = "exchangeable",
+      data = not_both_data)
+```
+
+## Exponentiated parameter estimates (ORs)
+```{r}
+tbl_regression(gee_mod, intercept = TRUE, exponentiate = TRUE) %>%
+    add_glance_table(include = c("df.residual", "n.clusters", "max.cluster.size", "alpha", "gamma")) %>%
+  as_gt()
+```
+
+## Unexponentiated parameter estimates(log-odds)
+```{r}
+tbl_regression(gee_mod, intercept = TRUE, exponentiate = FALSE) %>%
+    add_glance_table(include = c("df.residual", "n.clusters", "max.cluster.size", "alpha", "gamma")) %>%
+  as_gt() 
+```
