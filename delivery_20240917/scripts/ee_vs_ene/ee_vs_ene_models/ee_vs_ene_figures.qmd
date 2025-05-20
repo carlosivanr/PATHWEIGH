@@ -1,0 +1,236 @@
+---
+title: "EE vs ENE Figures"
+date: "`r Sys.Date()`"
+
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+    toc: true
+
+execute: 
+  echo: false
+---
+
+
+```{r, warning=FALSE, message=FALSE}
+invisible(library(tidyverse))
+library(gtsummary)
+library(magrittr, include.only = "%<>%")
+```
+
+
+# Model 4a
+```{r}
+# Read the 
+fig_data <- 
+  readxl::read_excel("D:\\PATHWEIGH\\delivery_20240917\\scripts\\ee_vs_ene\\ee_vs_ene_models\\figure_data.xlsx", sheet = "model_4a")
+```
+
+```{r}
+options(pillar.sigfig = 6)
+
+ribbon_data <- fig_data %>%
+  filter(Month %in% c(0, 6, 18)) %>%
+  pivot_longer(cols = -Month, names_to = "type", values_to = "value") %>%
+  arrange(desc(type)) %>%
+
+  # Get the values from the CI tables, manual input
+  mutate(
+    estimated_change = c(0, 0.29, 0.18, 0, -0.0005, -0.103),
+    lwr = c(0, 0.26, 0.15, 0, -0.034, -0.138),
+    upr = c(0, 0.32, 0.21, 0, 0.033, -0.067),
+  ) %>%
+  # to modify the CI at month 0 Commented out because the CIs are very large
+  # mutate(
+  #   across(lwr:upr, ~ ifelse(Month == 0, NA, .x))
+  # ) %>%
+  # group_by(type) %>%
+  # fill(lwr:upr, .direction = "updown") %>%
+  # ungroup() %>%
+  mutate(
+    start = value - estimated_change,
+    # conf.low = value - (estimated_change - lwr),
+    # conf.high = value + (upr - lwr)
+    conf.low = start + lwr,
+    conf.high = start + upr
+  )
+
+```
+
+```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
+#| eval: false
+fig_data %>%
+  pivot_longer(cols = -Month, names_to = "type", values_to = "value") %>%
+  ggplot(aes(x = Month, y = value, color = type)) +
+  geom_line() +
+  geom_ribbon(
+    data = ribbon_data, 
+    aes(ymin = conf.low, ymax = conf.high), 
+    alpha = 0.2, 
+    linetype = "dashed",
+    show.legend = FALSE) +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  ylab("Predicted weight (kgs)") +
+  xlab("Months after initial visit") +
+  ylim(88, 91.5) +
+  facet_wrap(~ factor(type, c("Usual Care", "Intervention"))) +
+  theme(
+    strip.text.x = element_text(hjust = 0, face = "bold"),
+    legend.position = "none")
+
+```
+
+```{r, fig.height = 5, fig.width=6.5, fig.dpi = 600}
+fig_data %>%
+  pivot_longer(cols = -Month, names_to = "type", values_to = "value") %>%
+  ggplot(aes(x = Month, y = value, color = type)) +
+  geom_line() +
+  geom_ribbon(
+    data = ribbon_data, 
+    aes(ymin = conf.low, ymax = conf.high), 
+    alpha = 0.2, 
+    linetype = "dashed",
+    show.legend = FALSE) +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  ylab("Predicted weight (kgs)") +
+  xlab("Months after initial visit") +
+  ylim(88, 91.5) +
+  labs(color=NULL) +
+  # facet_wrap(~ factor(type, c("Usual Care", "Intervention"))) +
+  theme_minimal() +
+  theme(
+    strip.text.x = element_text(hjust = 0, face = "bold"),
+    legend.position = "bottom")
+```
+
+
+# Model 5
+```{r}
+# Read the 
+fig_data <- 
+  readxl::read_excel("D:\\PATHWEIGH\\delivery_20240917\\scripts\\ee_vs_ene\\ee_vs_ene_models\\figure_data.xlsx", sheet = "model_5")
+```
+
+```{r}
+options(pillar.sigfig = 6)
+
+ribbon_data <- fig_data %>%
+  filter(Month %in% c(0, 6, 18)) %>%
+  pivot_longer(cols = -Month, names_to = "type", values_to = "value") %>%
+  arrange(desc(type)) %>%
+
+  # Get the values from the CI tables, manual input from xlsx file
+  # need to strip tabs for spaces and em dash for minus signs when copy pasting
+  mutate(
+    estimated_change = c(0, 0.2893, 0.2625, 0, -0.0592, -0.3892, 0, 0.0791, 0.1041, 0, -0.8794, -1.3013),
+    lwr = c(0, 0.2616, 0.2305, 0, -0.1148, -0.4296, 0, 0.0451, 0.0676, 0, -0.9491, -1.3542),
+    upr = c(0, 0.3171, 0.2944, 0, -0.0036, -0.3488, 0, 0.1131, 0.1406, 0, -0.8097, -1.2483)
+  ) %>%
+  mutate(
+    start = value - estimated_change,
+    # conf.low = value - (estimated_change - lwr),
+    # conf.high = value + (upr - lwr)
+    conf.low = start + lwr,
+    conf.high = start + upr
+  ) %>%
+  mutate(
+    comb = type, 
+    WPV = ifelse(str_detect(type, "no WPV"), "no WPV", "WPV"),
+    type = ifelse(str_detect(type, "Usual Care"), "Usual Care", "Intervention")
+  )
+```
+
+```{r, fig.height = 5, fig.width=6.5, fig.dpi = 600}
+#| eval: false
+fig_data %>%
+  pivot_longer(cols = -Month, names_to = "type", values_to = "value") %>%
+  mutate(
+    comb = type,
+    WPV = ifelse(str_detect(type, "no WPV"), "no WPV", "WPV"),
+    type = ifelse(str_detect(type, "Usual Care"), "Usual Care", "Intervention")
+  ) %>%
+  ggplot(aes(x = Month, y = value, color = comb)) +
+  geom_line() +
+  geom_ribbon(
+    data = ribbon_data, 
+    aes(ymin = conf.low, ymax = conf.high), 
+    alpha = 0.2, 
+    linetype = "dashed",
+    show.legend = FALSE) +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  ylab("Predicted weight (kgs)") +
+  xlab("Months after initial visit") +
+  labs(color=NULL) +
+  ylim(88, 91.5) +
+  facet_wrap(~ factor(type, c("Usual Care", "Intervention"))) +
+  theme(
+    strip.text.x = element_text(hjust = 0, face = "bold"),
+    legend.position = "bottom"
+    ) +
+  guides(color = guide_legend(nrow = 2))
+```
+
+```{r, fig.height = 5, fig.width=6.5, fig.dpi = 600}
+#| eval: false
+fig_data %>%
+  pivot_longer(cols = -Month, names_to = "type", values_to = "value") %>%
+  mutate(
+    comb = type,
+    WPV = ifelse(str_detect(type, "no WPV"), "no WPV", "WPV"),
+    type = ifelse(str_detect(type, "Usual Care"), "Usual Care", "Intervention")
+  ) %>%
+  ggplot(aes(x = Month, y = value, color = comb)) +
+  geom_line() +
+  geom_ribbon(
+    data = ribbon_data, 
+    aes(ymin = conf.low, ymax = conf.high), 
+    alpha = 0.2, 
+    linetype = "dashed",
+    show.legend = FALSE) +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  ylab("Predicted weight (kgs)") +
+  xlab("Months after initial visit") +
+  labs(color=NULL) +
+  ylim(88, 91.5) +
+  facet_wrap(~ factor(type, c("Usual Care", "Intervention")), ncol = 1) +
+  theme(
+    strip.text.x = element_text(hjust = 0, face = "bold"),
+    legend.position = "bottom"
+    ) +
+  guides(color = guide_legend(nrow = 2))
+```
+
+```{r, fig.height = 5, fig.width=6.5, fig.dpi = 600}
+fig_data %>%
+  pivot_longer(cols = -Month, names_to = "type", values_to = "value") %>%
+  mutate(
+    comb = type,
+    WPV = ifelse(str_detect(type, "no WPV"), "no WPV", "WPV"),
+    type = ifelse(str_detect(type, "Usual Care"), "Usual Care", "Intervention")
+  ) %>%
+  ggplot(aes(x = Month, y = value, color = comb)) +
+  geom_line() +
+  geom_ribbon(
+    data = ribbon_data, 
+    aes(x = Month, ymin = conf.low, ymax = conf.high),
+    alpha = 0.2, 
+    linetype = "dashed",
+    show.legend = FALSE) +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  ylab("Predicted weight (kgs)") +
+  xlab("Months after initial visit") +
+  labs(color=NULL) +
+  ylim(88, 91.5) +
+  # facet_wrap(~ factor(type, c("Usual Care", "Intervention")), ncol = 1) +
+  theme_minimal() +
+  theme(
+    strip.text.x = element_text(hjust = 0, face = "bold"),
+    legend.position = "bottom"
+    ) +
+  guides(color = guide_legend(nrow = 2)) +
+  scale_color_discrete(labels = c(
+    "Intervention, received care", #OK
+    "Intervention, did not receive care", # Needs to be Usual Care
+    "Usual Care, received care", 
+    "Usual Care, did not receive care"))
+```

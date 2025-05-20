@@ -913,6 +913,117 @@ decimals = 2  # Use `decimals` for fixed decimal places
 )
 ```
 
+## CI for the difference between Intervention & Condtro at 0-18 months (DiD framework)
+```{r}
+coefs <- lme4::fixef(model_4a)
+
+# Create a reference profile
+x_base <- rep(0, length(coefs))
+names(x_base) <- names(coefs)
+
+x_con_pre <- x_base
+x_con_pre["(Intercept)"] <- 1
+x_con_pre["N_months_post_id_con"] <- 0
+x_con_pre["N_months_post_id_con_180"] <- 0
+x_con_pre["N_months_post_id_con_540"] <- 0
+# x_con_pre["N_months_post_wpv_con"] <- 0
+# x_con_pre["N_months_post_wpv_con_180"] <- 0
+x_con_pre["N_months_post_id_int"] <- 0
+x_con_pre["N_months_post_id_int_180"] <- 0
+# x_con_pre["N_months_post_wpv_int"] <- 0
+# x_con_pre["N_months_post_wpv_int_180"] <- 0
+
+x_con <- x_base
+x_con["(Intercept)"] <- 1  
+x_con["N_months_post_id_con"] <- 18
+x_con["N_months_post_id_con_180"] <- 12
+x_con["N_months_post_id_con_540"] <- 0
+# x_con["N_months_post_wpv_con"] <- 18
+# x_con["N_months_post_wpv_con_180"] <- 12
+x_con["N_months_post_id_int"] <- 0
+x_con["N_months_post_id_int_180"] <- 0 
+# x_con["N_months_post_wpv_int"] <- 0
+# x_con["N_months_post_wpv_int_180"] <- 0 
+
+
+x_int_pre <- x_base
+x_int_pre["(Intercept)"] <- 1
+x_int_pre["N_months_post_id_con"] <- 0
+x_int_pre["N_months_post_id_con_180"] <- 0
+x_int_pre["N_months_post_id_con_540"] <- 0
+# x_int_pre["N_months_post_wpv_con"] <- 0
+# x_int_pre["N_months_post_wpv_con_180"] <- 0
+x_int_pre["N_months_post_id_int"] <- 0
+x_int_pre["N_months_post_id_int_180"] <- 0
+# x_int_pre["N_months_post_wpv_int"] <- 0
+# x_int_pre["N_months_post_wpv_int_180"] <- 0
+
+
+x_int <- x_base
+x_int["(Intercept)"] <- 1
+x_int["N_months_post_id_con"] <- 18
+x_int["N_months_post_id_con_180"] <- 12
+x_int["N_months_post_id_con_540"] <- 0
+# x_int["N_months_post_wpv_con"] <- 0
+# x_int["N_months_post_wpv_con_180"] <- 0
+x_int["N_months_post_id_int"] <- 18
+x_int["N_months_post_id_int_180"] <- 12
+# x_int["N_months_post_wpv_int"] <- 0
+# x_int["N_months_post_wpv_int_180"] <- 0
+
+# Predictions for pre-treatment
+pred_con_pre <- sum(coefs * x_con_pre)
+pred_int_pre <- sum(coefs * x_int_pre)
+
+# Predictions for post-treatment (already defined)
+pred_con_post <- sum(coefs * x_con)
+pred_int_post <- sum(coefs * x_int)
+
+# Compute differences within each group
+diff_con <- pred_con_post - pred_con_pre  # Change for control
+diff_int <- pred_int_post - pred_int_pre  # Change for intervention
+
+# Compute difference-in-differences estimate
+DiD <- diff_int - diff_con
+
+# Variance-covariance matrix
+vcov_mat <- vcov(model_4a)
+
+# Create contrast vector for DiD
+contrast_vec_did <- (x_int - x_int_pre) - (x_con - x_con_pre)
+
+# Compute standard error for DiD estimate
+se_did <- sqrt(t(contrast_vec_did) %*% vcov_mat %*% contrast_vec_did)
+
+# 95% Confidence Interval
+lower_did <- DiD - 1.96 * se_did
+upper_did <- DiD + 1.96 * se_did
+
+# Compute t-statistic
+t_stat <- (DiD / se_did)[1]
+
+# Approximate p-value using normal distribution
+p_value <- 2 * (1 - pnorm(abs(t_stat)))  # Two-tailed test
+
+
+data.frame(
+  diff_con = diff_con,
+  diff_int = diff_int,
+  DiD = DiD,
+  se = as.numeric(se_did),
+  lwr = as.numeric(lower_did),
+  upr = as.numeric(upper_did),
+  p = p_value) %>%
+gt::gt() %>%
+gt::fmt_number(
+columns = everything(),
+decimals = 2  # Use `decimals` for fixed decimal places
+)
+```
+
+```{r}
+
+```
 
 # Figure
 ```{r}
@@ -960,6 +1071,19 @@ fig_data %>%
   pivot_longer(cols = -Month, names_to = "type", values_to = "value") %>%
   ggplot(aes(x = Month, y = value, color = type)) +
   geom_line() +
-  geom_ribbon(data = ribbon_data, aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, linetype = "dashed") +
-  facet_wrap(~ type)
+  geom_ribbon(
+    data = ribbon_data, 
+    aes(ymin = conf.low, ymax = conf.high), 
+    alpha = 0.2, 
+    linetype = "dashed",
+    show.legend = FALSE) +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  ylab("Predicted weight (kgs)") +
+  xlab("Months after initial visit") +
+  ylim(83, 92) +
+  facet_wrap(~ factor(type, c("Usual Care", "Intervention"))) +
+  theme(
+    strip.text.x = element_text(hjust = 0, face = "bold"),
+    legend.position = "none")
+
 ```

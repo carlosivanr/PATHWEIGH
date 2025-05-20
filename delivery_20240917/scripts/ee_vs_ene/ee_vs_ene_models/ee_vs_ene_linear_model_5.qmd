@@ -221,7 +221,6 @@ tbl_regression(model_5, intercept = TRUE,
   # gt::gtsave(., filename = "D:/PATHWEIGH/delivery_20240917/scripts/ee_vs_ene/ee_vs_ene_models/model_5.docx" )
 ```
 
-
 ## Residual vs predicted/fitted values
 - Predicted/fitted values consider random effects
 ```{r}
@@ -229,7 +228,6 @@ plot_res_vs_pred(model_5)
 ```
 
 ## QQ Plot
-
 ```{r}
 # Extract residuals
 res <- resid(model_5)
@@ -387,6 +385,30 @@ obs_pred %>%
   plot_obs_pred_v2()
 ```
 
+
+# Time spent in each phase overall
+```{r}
+data %>%
+  filter(Intervention.factor == "Control") %>%
+  group_by(Arb_PersonId) %>%
+  arrange(N_months_post_id_con) %>%
+  slice_tail() %>%
+  ungroup() %>%
+  select(Arb_PersonId, N_months_post_id_con) %>%
+  summarise(avg_t_in_phase = mean(N_months_post_id_con))
+
+
+data %>%
+  filter(Intervention.factor == "Intervention") %>%
+  group_by(Arb_PersonId) %>%
+  arrange(N_months_post_id_con) %>%
+  slice_tail() %>%
+  ungroup() %>%
+  select(Arb_PersonId, N_months_post_id_con) %>%
+  summarise(avg_t_in_phase = mean(N_months_post_id_con))
+```
+
+
 # Time spent in study Usual Care for EE
 ```{r}
 data %>% 
@@ -408,6 +430,31 @@ data %>%
   ungroup() %>%
   summarise(avg_t_in_phase = mean(N_months_post_id_con))
 ```
+
+# Time spent in study Usual Care for ENE
+```{r}
+data %>% 
+  filter(EE == 0, Intervention.factor == "Control") %>%
+  group_by(Arb_PersonId) %>% 
+  arrange(EncounterDate) %>% 
+  slice_tail() %>%
+  ungroup() %>%
+  summarise(avg_t_in_phase = mean(N_months_post_id_con))
+```
+
+# Time spent in study Intervention for ENE
+```{r}
+data %>% 
+  filter(EE == 0, Intervention.factor == "Intervention") %>%
+  group_by(Arb_PersonId) %>% 
+  arrange(EncounterDate) %>% 
+  slice_tail() %>%
+  ungroup() %>%
+  summarise(avg_t_in_phase = mean(N_months_post_id_con))
+```
+
+
+
 
 
 # Confidence intervals
@@ -447,7 +494,7 @@ model_5 <- lmerTest::lmer(
   # N_months_post_wpv_int_180
 ```
 
-```{r}
+```{r, compute estimated change}
 compute_estimated_change <- function(model, input_vector) {
 
   # Extract fixed effects coefficients
@@ -527,20 +574,18 @@ compute_estimated_change <- function(model, input_vector) {
 <!-- ////////////////////////////////// EE ///////////////////////////////// -->
 ## Predicted average weight from 0-6 months in usual care who received care for their weight
 ```{r}
-
 input_vector <- c(6, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)  # Modify as needed
 compute_estimated_change(model_5, input_vector)
 ```
 
-## Predicted average weight from 6-18 months in usual care
+## Predicted average weight from 6-18 months in usual care who received care for their weight
 ```{r}
 # Example usage:
 input_vector <- c(18, 12, 18, 12, 0, 0, 0, 0, 6, 0, 6, 0, 0, 0, 0, 0)  # Modify as needed
-
 compute_estimated_change(model_5, input_vector)
 ```
 
-## Predicted average weight from 0-18 months in usual care
+## Predicted average weight from 0-18 months in usual care who received care for their weight
 ```{r}
 # Example usage:
 input_vector <- c(18, 12, 18, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)  # Modify as needed
@@ -549,21 +594,21 @@ compute_estimated_change(model_5, input_vector)
 
 <!--///////////////////// INTERVENTION ///////////////////// -->
 
-## Predicted average weight from 0-6 months in intervention
+## Predicted average weight from 0-6 months in intervention who received care for their weight
 ```{r}
 # Example usage:
-input_vector <- c(6, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)  # Modify as needed
+input_vector <- c(6, 0, 6, 0, 6, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0)  # Modify as needed
 compute_estimated_change(model_5, input_vector)
 ```
 
-## Predicted average weight from 6-18 months in intervention
+## Predicted average weight from 6-18 months in intervention who received care for their weight
 ```{r}
 # Example usage:
 input_vector <- c(18, 12, 18, 12, 18, 12, 18, 12, 6, 0, 6, 0, 6, 0, 6, 0)  # Modify as needed
 compute_estimated_change(model_5, input_vector)
 ```
 
-## Predicted average weight from 0-18 months in intervention
+## Predicted average weight from 0-18 months in intervention who received care for their weight
 ```{r}
 # Example usage:
 input_vector <- c(18, 12, 18, 12, 18, 12, 18, 12, 0, 0, 0, 0, 0, 0, 0, 0)  # Modify as needed
@@ -571,49 +616,23 @@ compute_estimated_change(model_5, input_vector)
 ```
 
 <!-- //////////////////////////////// ENE ///////////////////////////////// -->
-
-# Time spent in study Usual Care for ENE
-```{r}
-data %>% 
-  filter(EE == 0, Intervention.factor == "Control") %>%
-  group_by(Arb_PersonId) %>% 
-  arrange(EncounterDate) %>% 
-  slice_tail() %>%
-  ungroup() %>%
-  summarise(avg_t_in_phase = mean(N_months_post_id_con))
-```
-
-# Time spent in study Intervention for ENE
-```{r}
-data %>% 
-  filter(EE == 0, Intervention.factor == "Intervention") %>%
-  group_by(Arb_PersonId) %>% 
-  arrange(EncounterDate) %>% 
-  slice_tail() %>%
-  ungroup() %>%
-  summarise(avg_t_in_phase = mean(N_months_post_id_con))
-```
-
 ## Predicted average weight from 0-6 months in usual care for those who did not received care for their weight
 ```{r}
-
-input_vector <- c(6, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)  # Modify as needed
+input_vector <- c(6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)  # Modify as needed
 compute_estimated_change(model_5, input_vector)
 ```
 
 ## Predicted average weight from 6-18 months in usual care for those who did not received care for their weight
 ```{r}
 # Example usage:
-input_vector <- c(18, 12, 0, 0, 18, 12, 0, 0, 6, 0, 0, 0, 6, 0, 0, 0)  # Modify as needed
-
+input_vector <- c(18, 12, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0)  # Modify as needed
 compute_estimated_change(model_5, input_vector)
 ```
 
 ## Predicted average weight from 0-18 months in usual care for those who did not received care for their weight
 ```{r}
 # Example usage:
-input_vector <- c(18, 12, 0, 0, 18, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)  # Modify as needed
-
+input_vector <- c(18, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)  # Modify as needed
 compute_estimated_change(model_5, input_vector)
 ```
 
@@ -623,29 +642,26 @@ compute_estimated_change(model_5, input_vector)
 ```{r}
 # Example usage:
 input_vector <- c(6, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)  # Modify as needed
-
 compute_estimated_change(model_5, input_vector)
 ```
 
 ## Predicted average weight from 6-18 months in intervention for those who did not received care for their weight
 ```{r}
 # Example usage:
-input_vector <- c(18, 12, 0, 0, 18, 12, 0, 0, 6, 0, 6, 0, 6, 0, 6, 0)  # Modify as needed
+input_vector <- c(18, 12, 0, 0, 18, 12, 0, 0, 6, 0, 0, 0, 6, 0, 0, 0)  # Modify as needed
 compute_estimated_change(model_5, input_vector)
 ```
 
 ## Predicted average weight from 0-18 months in intervention for those who did not received care for their weight
 ```{r}
 # Example usage:
-input_vector <- c(18, 12, 18, 12, 18, 12, 18, 12, 0, 0, 0, 0, 0, 0, 0, 0)  # Modify as needed
-
+input_vector <- c(18, 12, 0, 0, 18, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)  # Modify as needed
 compute_estimated_change(model_5, input_vector)
 ```
 
-
-
 ## CI for the difference between EE vs ENE at 0-6 months in usual care
 ```{r}
+# GOOD 5/16/2025
 coefs <- lme4::fixef(model_5)
 
 # Create a reference profile
@@ -755,8 +771,8 @@ decimals = 2  # Use `decimals` for fixed decimal places
 ```
 
 ## CI for the difference between EE vs ENE at 6-18 months in usual care
-
 ```{r}
+# GOOD 5/16/2025
 coefs <- lme4::fixef(model_5)
 
 # Create a reference profile
@@ -849,6 +865,116 @@ t_stat <- (DiD / se_did)[1]
 # Approximate p-value using normal distribution
 p_value <- 2 * (1 - pnorm(abs(t_stat)))  # Two-tailed test
 
+data.frame(
+  diff_con = diff_con,
+  diff_int = diff_int,
+  DiD = DiD,
+  se = as.numeric(se_did),
+  lwr = as.numeric(lower_did),
+  upr = as.numeric(upper_did),
+  p = p_value) %>%
+gt::gt() %>%
+gt::fmt_number(
+columns = everything(),
+decimals = 2  # Use `decimals` for fixed decimal places
+)
+```
+
+## CI for the difference between EE vs ENE at 0-18 months in usual care
+```{r}
+# GOOD 5/16/2025
+coefs <- lme4::fixef(model_5)
+
+# Create a reference profile
+x_base <- rep(0, length(coefs))
+names(x_base) <- names(coefs)
+
+# Pre and post EE in usual care ------------------------------------------------
+x_con_pre <- x_base
+x_con_pre["(Intercept)"] <- 1
+x_con_pre["N_months_post_id_con"] <- 0
+x_con_pre["N_months_post_id_con_180"] <- 0
+x_con_pre["N_months_post_id_con_540"] <- 0
+x_con_pre["N_months_post_wpv_con"] <- 0
+x_con_pre["N_months_post_wpv_con_180"] <- 0
+x_con_pre["N_months_post_id_int"] <- 0
+x_con_pre["N_months_post_id_int_180"] <- 0
+x_con_pre["N_months_post_wpv_int"] <- 0
+x_con_pre["N_months_post_wpv_int_180"] <- 0
+
+x_con <- x_base
+x_con["(Intercept)"] <- 1  
+x_con["N_months_post_id_con"] <- 18
+x_con["N_months_post_id_con_180"] <- 12
+x_con["N_months_post_id_con_540"] <- 0
+x_con["N_months_post_wpv_con"] <- 18
+x_con["N_months_post_wpv_con_180"] <- 12
+x_con["N_months_post_id_int"] <- 0
+x_con["N_months_post_id_int_180"] <- 0 
+x_con["N_months_post_wpv_int"] <- 0
+x_con["N_months_post_wpv_int_180"] <- 0 
+
+
+# Pre and post ENE in usual care ----------------------------------------------
+x_int_pre <- x_base
+x_int_pre["(Intercept)"] <- 1
+x_int_pre["N_months_post_id_con"] <- 0
+x_int_pre["N_months_post_id_con_180"] <- 0
+x_int_pre["N_months_post_id_con_540"] <- 0
+x_int_pre["N_months_post_wpv_con"] <- 0
+x_int_pre["N_months_post_wpv_con_180"] <- 0
+x_int_pre["N_months_post_id_int"] <- 0
+x_int_pre["N_months_post_id_int_180"] <- 0
+x_int_pre["N_months_post_wpv_int"] <- 0
+x_int_pre["N_months_post_wpv_int_180"] <- 0
+
+
+x_int <- x_base
+x_int["(Intercept)"] <- 1
+x_int["N_months_post_id_con"] <- 18
+x_int["N_months_post_id_con_180"] <- 12
+x_int["N_months_post_id_con_540"] <- 0
+x_int["N_months_post_wpv_con"] <- 0
+x_int["N_months_post_wpv_con_180"] <- 0
+x_int["N_months_post_id_int"] <- 0
+x_int["N_months_post_id_int_180"] <- 0
+x_int["N_months_post_wpv_int"] <- 0
+x_int["N_months_post_wpv_int_180"] <- 0
+
+# Predictions for pre-treatment
+pred_con_pre <- sum(coefs * x_con_pre)
+pred_int_pre <- sum(coefs * x_int_pre)
+
+# Predictions for post-treatment (already defined)
+pred_con_post <- sum(coefs * x_con)
+pred_int_post <- sum(coefs * x_int)
+
+# Compute differences within each group
+diff_con <- pred_con_post - pred_con_pre  # Change for control
+diff_int <- pred_int_post - pred_int_pre  # Change for intervention
+
+# Compute difference-in-differences estimate
+DiD <- diff_int - diff_con
+
+# Variance-covariance matrix
+vcov_mat <- vcov(model_5)
+
+# Create contrast vector for DiD
+contrast_vec_did <- (x_int - x_int_pre) - (x_con - x_con_pre)
+
+# Compute standard error for DiD estimate
+se_did <- sqrt(t(contrast_vec_did) %*% vcov_mat %*% contrast_vec_did)
+
+# 95% Confidence Interval
+lower_did <- DiD - 1.96 * se_did
+upper_did <- DiD + 1.96 * se_did
+
+# Compute t-statistic
+t_stat <- (DiD / se_did)[1]
+
+# Approximate p-value using normal distribution
+p_value <- 2 * (1 - pnorm(abs(t_stat)))  # Two-tailed test
+
 
 data.frame(
   diff_con = diff_con,
@@ -867,6 +993,7 @@ decimals = 2  # Use `decimals` for fixed decimal places
 
 ## CI for the difference between EE vs ENE at 0-6 months in intervention
 ```{r}
+# GOOD 5/16/2025
 coefs <- lme4::fixef(model_5)
 
 # Create a reference profile
@@ -976,8 +1103,8 @@ decimals = 2  # Use `decimals` for fixed decimal places
 ```
 
 ## CI for the difference between EE vs ENE at 6-18 months in intervention
-
 ```{r}
+# GOOD 5/16/2025
 coefs <- lme4::fixef(model_5)
 
 # Create a reference profile
@@ -1084,4 +1211,398 @@ gt::fmt_number(
 columns = everything(),
 decimals = 2  # Use `decimals` for fixed decimal places
 )
+```
+
+## CI for the difference between EE vs ENE at 0-18 months in intervention
+```{r}
+# GOOD 5/16/2025
+coefs <- lme4::fixef(model_5)
+
+# Create a reference profile
+x_base <- rep(0, length(coefs))
+names(x_base) <- names(coefs)
+
+# Pre and post EE in intervention ------------------------------------------------
+x_con_pre <- x_base
+x_con_pre["(Intercept)"] <- 1
+x_con_pre["N_months_post_id_con"] <- 0
+x_con_pre["N_months_post_id_con_180"] <- 0
+x_con_pre["N_months_post_id_con_540"] <- 0
+x_con_pre["N_months_post_wpv_con"] <- 0
+x_con_pre["N_months_post_wpv_con_180"] <- 0
+x_con_pre["N_months_post_id_int"] <- 0
+x_con_pre["N_months_post_id_int_180"] <- 0
+x_con_pre["N_months_post_wpv_int"] <- 0
+x_con_pre["N_months_post_wpv_int_180"] <- 0
+
+x_con <- x_base
+x_con["(Intercept)"] <- 1  
+x_con["N_months_post_id_con"] <- 18
+x_con["N_months_post_id_con_180"] <- 12
+x_con["N_months_post_id_con_540"] <- 0
+x_con["N_months_post_wpv_con"] <- 18
+x_con["N_months_post_wpv_con_180"] <- 12
+x_con["N_months_post_id_int"] <- 18
+x_con["N_months_post_id_int_180"] <- 12 
+x_con["N_months_post_wpv_int"] <- 18
+x_con["N_months_post_wpv_int_180"] <- 12 
+
+
+# Pre and post ENE in intervention ----------------------------------------------
+x_int_pre <- x_base
+x_int_pre["(Intercept)"] <- 1
+x_int_pre["N_months_post_id_con"] <- 0
+x_int_pre["N_months_post_id_con_180"] <- 0
+x_int_pre["N_months_post_id_con_540"] <- 0
+x_int_pre["N_months_post_wpv_con"] <- 0
+x_int_pre["N_months_post_wpv_con_180"] <- 0
+x_int_pre["N_months_post_id_int"] <- 0
+x_int_pre["N_months_post_id_int_180"] <- 0
+x_int_pre["N_months_post_wpv_int"] <- 0
+x_int_pre["N_months_post_wpv_int_180"] <- 0
+
+
+x_int <- x_base
+x_int["(Intercept)"] <- 1
+x_int["N_months_post_id_con"] <- 18
+x_int["N_months_post_id_con_180"] <- 12
+x_int["N_months_post_id_con_540"] <- 0
+x_int["N_months_post_wpv_con"] <- 0
+x_int["N_months_post_wpv_con_180"] <- 0
+x_int["N_months_post_id_int"] <- 18
+x_int["N_months_post_id_int_180"] <- 12
+x_int["N_months_post_wpv_int"] <- 0
+x_int["N_months_post_wpv_int_180"] <- 0
+
+# Predictions for pre-treatment
+pred_con_pre <- sum(coefs * x_con_pre)
+pred_int_pre <- sum(coefs * x_int_pre)
+
+# Predictions for post-treatment (already defined)
+pred_con_post <- sum(coefs * x_con)
+pred_int_post <- sum(coefs * x_int)
+
+# Compute differences within each group
+diff_con <- pred_con_post - pred_con_pre  # Change for control
+diff_int <- pred_int_post - pred_int_pre  # Change for intervention
+
+# Compute difference-in-differences estimate
+DiD <- diff_int - diff_con
+
+# Variance-covariance matrix
+vcov_mat <- vcov(model_5)
+
+# Create contrast vector for DiD
+contrast_vec_did <- (x_int - x_int_pre) - (x_con - x_con_pre)
+
+# Compute standard error for DiD estimate
+se_did <- sqrt(t(contrast_vec_did) %*% vcov_mat %*% contrast_vec_did)
+
+# 95% Confidence Interval
+lower_did <- DiD - 1.96 * se_did
+upper_did <- DiD + 1.96 * se_did
+
+# Compute t-statistic
+t_stat <- (DiD / se_did)[1]
+
+# Approximate p-value using normal distribution
+p_value <- 2 * (1 - pnorm(abs(t_stat)))  # Two-tailed test
+
+
+data.frame(
+  diff_con = diff_con,
+  diff_int = diff_int,
+  DiD = DiD,
+  se = as.numeric(se_did),
+  lwr = as.numeric(lower_did),
+  upr = as.numeric(upper_did),
+  p = p_value) %>%
+gt::gt() %>%
+gt::fmt_number(
+columns = everything(),
+decimals = 2  # Use `decimals` for fixed decimal places
+)
+```
+
+## CI for the difference between Usual care and Intervention from 0-18mo amonth those with a WPV
+```{r}
+coefs <- lme4::fixef(model_5)
+
+# Create a reference profile
+x_base <- rep(0, length(coefs))
+names(x_base) <- names(coefs)
+
+# Pre and post EE in Control 0-18mo ------------------------------------------------
+x_con_pre <- x_base
+x_con_pre["(Intercept)"] <- 1
+x_con_pre["N_months_post_id_con"] <- 0
+x_con_pre["N_months_post_id_con_180"] <- 0
+x_con_pre["N_months_post_id_con_540"] <- 0
+x_con_pre["N_months_post_wpv_con"] <- 0
+x_con_pre["N_months_post_wpv_con_180"] <- 0
+x_con_pre["N_months_post_id_int"] <- 0
+x_con_pre["N_months_post_id_int_180"] <- 0
+x_con_pre["N_months_post_wpv_int"] <- 0
+x_con_pre["N_months_post_wpv_int_180"] <- 0
+
+x_con <- x_base
+x_con["(Intercept)"] <- 1  
+x_con["N_months_post_id_con"] <- 18
+x_con["N_months_post_id_con_180"] <- 12
+x_con["N_months_post_id_con_540"] <- 0
+x_con["N_months_post_wpv_con"] <- 18
+x_con["N_months_post_wpv_con_180"] <- 12
+x_con["N_months_post_id_int"] <- 0
+x_con["N_months_post_id_int_180"] <- 0
+x_con["N_months_post_wpv_int"] <- 0
+x_con["N_months_post_wpv_int_180"] <- 0 
+
+
+# Pre and post EE in Intervention 0-18 mo ----------------------------------------------
+x_int_pre <- x_base
+x_int_pre["(Intercept)"] <- 1
+x_int_pre["N_months_post_id_con"] <- 0
+x_int_pre["N_months_post_id_con_180"] <- 0
+x_int_pre["N_months_post_id_con_540"] <- 0
+x_int_pre["N_months_post_wpv_con"] <- 0
+x_int_pre["N_months_post_wpv_con_180"] <- 0
+x_int_pre["N_months_post_id_int"] <- 0
+x_int_pre["N_months_post_id_int_180"] <- 0
+x_int_pre["N_months_post_wpv_int"] <- 0
+x_int_pre["N_months_post_wpv_int_180"] <- 0
+
+
+x_int <- x_base
+x_int["(Intercept)"] <- 1
+x_int["N_months_post_id_con"] <- 18
+x_int["N_months_post_id_con_180"] <- 12
+x_int["N_months_post_id_con_540"] <- 0
+x_int["N_months_post_wpv_con"] <- 18
+x_int["N_months_post_wpv_con_180"] <- 12
+x_int["N_months_post_id_int"] <- 18
+x_int["N_months_post_id_int_180"] <- 12
+x_int["N_months_post_wpv_int"] <- 18
+x_int["N_months_post_wpv_int_180"] <- 12
+
+# Predictions for pre-treatment
+pred_con_pre <- sum(coefs * x_con_pre)
+pred_int_pre <- sum(coefs * x_int_pre)
+
+# Predictions for post-treatment (already defined)
+pred_con_post <- sum(coefs * x_con)
+pred_int_post <- sum(coefs * x_int)
+
+# Compute differences within each group
+diff_con <- pred_con_post - pred_con_pre  # Change for control
+diff_int <- pred_int_post - pred_int_pre  # Change for intervention
+
+# Compute difference-in-differences estimate
+DiD <- diff_int - diff_con
+
+# Variance-covariance matrix
+vcov_mat <- vcov(model_5)
+
+# Create contrast vector for DiD
+contrast_vec_did <- (x_int - x_int_pre) - (x_con - x_con_pre)
+
+# Compute standard error for DiD estimate
+se_did <- sqrt(t(contrast_vec_did) %*% vcov_mat %*% contrast_vec_did)
+
+# 95% Confidence Interval
+lower_did <- DiD - 1.96 * se_did
+upper_did <- DiD + 1.96 * se_did
+
+# Compute t-statistic
+t_stat <- (DiD / se_did)[1]
+
+# Approximate p-value using normal distribution
+p_value <- 2 * (1 - pnorm(abs(t_stat)))  # Two-tailed test
+
+
+data.frame(
+  diff_con = diff_con,
+  diff_int = diff_int,
+  DiD = DiD,
+  se = as.numeric(se_did),
+  lwr = as.numeric(lower_did),
+  upr = as.numeric(upper_did),
+  p = p_value) %>%
+gt::gt() %>%
+gt::fmt_number(
+columns = everything(),
+decimals = 2  # Use `decimals` for fixed decimal places
+)
+```
+
+
+
+
+
+## CI for the difference between Usual care and Intervention from 0-18mo among those with no WPV
+```{r}
+coefs <- lme4::fixef(model_5)
+
+# Create a reference profile
+x_base <- rep(0, length(coefs))
+names(x_base) <- names(coefs)
+
+# Pre and post EE in Control 0-18mo ------------------------------------------------
+x_con_pre <- x_base
+x_con_pre["(Intercept)"] <- 1
+x_con_pre["N_months_post_id_con"] <- 0
+x_con_pre["N_months_post_id_con_180"] <- 0
+x_con_pre["N_months_post_id_con_540"] <- 0
+x_con_pre["N_months_post_wpv_con"] <- 0
+x_con_pre["N_months_post_wpv_con_180"] <- 0
+x_con_pre["N_months_post_id_int"] <- 0
+x_con_pre["N_months_post_id_int_180"] <- 0
+x_con_pre["N_months_post_wpv_int"] <- 0
+x_con_pre["N_months_post_wpv_int_180"] <- 0
+
+x_con <- x_base
+x_con["(Intercept)"] <- 1  
+x_con["N_months_post_id_con"] <- 18
+x_con["N_months_post_id_con_180"] <- 12
+x_con["N_months_post_id_con_540"] <- 0
+x_con["N_months_post_wpv_con"] <- 0
+x_con["N_months_post_wpv_con_180"] <- 0
+x_con["N_months_post_id_int"] <- 0
+x_con["N_months_post_id_int_180"] <- 0
+x_con["N_months_post_wpv_int"] <- 0
+x_con["N_months_post_wpv_int_180"] <- 0 
+
+
+# Pre and post EE in Intervention 0-18 mo ----------------------------------------------
+x_int_pre <- x_base
+x_int_pre["(Intercept)"] <- 1
+x_int_pre["N_months_post_id_con"] <- 0
+x_int_pre["N_months_post_id_con_180"] <- 0
+x_int_pre["N_months_post_id_con_540"] <- 0
+x_int_pre["N_months_post_wpv_con"] <- 0
+x_int_pre["N_months_post_wpv_con_180"] <- 0
+x_int_pre["N_months_post_id_int"] <- 0
+x_int_pre["N_months_post_id_int_180"] <- 0
+x_int_pre["N_months_post_wpv_int"] <- 0
+x_int_pre["N_months_post_wpv_int_180"] <- 0
+
+
+x_int <- x_base
+x_int["(Intercept)"] <- 1
+x_int["N_months_post_id_con"] <- 18
+x_int["N_months_post_id_con_180"] <- 12
+x_int["N_months_post_id_con_540"] <- 0
+x_int["N_months_post_wpv_con"] <- 0
+x_int["N_months_post_wpv_con_180"] <- 0
+x_int["N_months_post_id_int"] <- 18
+x_int["N_months_post_id_int_180"] <- 12
+x_int["N_months_post_wpv_int"] <- 0
+x_int["N_months_post_wpv_int_180"] <- 0
+
+# Predictions for pre-treatment
+pred_con_pre <- sum(coefs * x_con_pre)
+pred_int_pre <- sum(coefs * x_int_pre)
+
+# Predictions for post-treatment (already defined)
+pred_con_post <- sum(coefs * x_con)
+pred_int_post <- sum(coefs * x_int)
+
+# Compute differences within each group
+diff_con <- pred_con_post - pred_con_pre  # Change for control
+diff_int <- pred_int_post - pred_int_pre  # Change for intervention
+
+# Compute difference-in-differences estimate
+DiD <- diff_int - diff_con
+
+# Variance-covariance matrix
+vcov_mat <- vcov(model_5)
+
+# Create contrast vector for DiD
+contrast_vec_did <- (x_int - x_int_pre) - (x_con - x_con_pre)
+
+# Compute standard error for DiD estimate
+se_did <- sqrt(t(contrast_vec_did) %*% vcov_mat %*% contrast_vec_did)
+
+# 95% Confidence Interval
+lower_did <- DiD - 1.96 * se_did
+upper_did <- DiD + 1.96 * se_did
+
+# Compute t-statistic
+t_stat <- (DiD / se_did)[1]
+
+# Approximate p-value using normal distribution
+p_value <- 2 * (1 - pnorm(abs(t_stat)))  # Two-tailed test
+
+
+data.frame(
+  diff_con = diff_con,
+  diff_int = diff_int,
+  DiD = DiD,
+  se = as.numeric(se_did),
+  lwr = as.numeric(lower_did),
+  upr = as.numeric(upper_did),
+  p = p_value) %>%
+gt::gt() %>%
+gt::fmt_number(
+columns = everything(),
+decimals = 2  # Use `decimals` for fixed decimal places
+)
+```
+
+
+
+
+
+<!-- ////////////////////////////////////////////////////////////////////// -->
+# Figure
+```{r}
+# Read the 
+fig_data <- 
+  readxl::read_excel("D:\\PATHWEIGH\\delivery_20240917\\scripts\\ee_vs_ene\\ee_vs_ene_models\\figure_data.xlsx", sheet = "model_5")
+```
+
+```{r}
+options(pillar.sigfig = 6)
+
+ribbon_data <- fig_data %>%
+  filter(Month %in% c(0, 6, 18)) %>%
+  pivot_longer(cols = -Month, names_to = "type", values_to = "value") %>%
+  arrange(desc(type)) %>%
+
+  # Get the values from the CI tables, manual input from xlsx
+  # need to strip tabs for spaces and em dash for minus sign
+  mutate(
+    estimated_change = c(0, 0.2893, 0.2625, 0, -0.0592, -0.3892, 0, 0.0791, 0.1041, 0, -0.8794, -1.3013),
+    lwr = c(0, 0.2616, 0.2305, 0, -0.1148, -0.4296, 0, 0.0451, 0.0676, 0, -0.9491, -1.3542),
+    upr = c(0, 0.3171, 0.2944, 0, -0.0036, -0.3488, 0, 0.1131, 0.1406, 0, -0.8097, -1.2483)
+  ) %>%
+  mutate(
+    start = value - estimated_change,
+    # conf.low = value - (estimated_change - lwr),
+    # conf.high = value + (upr - lwr)
+    conf.low = start + lwr,
+    conf.high = start + upr
+  )
+```
+
+```{r, fig.height = 4.2, fig.width=6.5, fig.dpi = 600}
+fig_data %>%
+  pivot_longer(cols = -Month, names_to = "type", values_to = "value") %>%
+  ggplot(aes(x = Month, y = value, color = type)) +
+  geom_line() +
+  geom_ribbon(
+    data = ribbon_data, 
+    aes(ymin = conf.low, ymax = conf.high), 
+    alpha = 0.2, 
+    linetype = "dashed",
+    show.legend = FALSE) +
+  scale_x_continuous(breaks = seq(0,18,3)) +
+  ylab("Predicted weight (kgs)") +
+  xlab("Months after initial visit") +
+  ylim(83, 92) +
+
+  facet_wrap(~ factor(type, c("Usual Care, no WPV", "Intervention, no WPV", "Usual Care, initial visit WPV", "Intervention, initial visit WPV"))) +
+  theme(
+    strip.text.x = element_text(hjust = 0, face = "bold"),
+    legend.position = "none")
+
 ```

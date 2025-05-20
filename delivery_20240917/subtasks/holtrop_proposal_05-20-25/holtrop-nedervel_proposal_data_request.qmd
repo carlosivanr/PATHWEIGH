@@ -1,0 +1,333 @@
+---
+title: "Holtrop-Nederveld Proposal: Data Request"
+date: "`r Sys.Date()`"
+
+format: 
+  docx:
+    reference-doc: "D:/PATHWEIGH/custom-reference-doc.docx"
+    toc: true
+
+execute: 
+  echo: false
+---
+
+
+```{r, warning=FALSE, message=FALSE}
+invisible(library(tidyverse))
+library(gtsummary)
+library(magrittr, include.only = "%<>%")
+```
+
+```{r, message = FALSE, warning = FALSE}
+# Load data
+data <- read_csv(
+  "D:\\PATHWEIGH\\delivery_20240917\\data\\aim3_its_data_20240917.csv"
+)
+```
+
+
+```{r}
+all_clinics <- names(table(data$DepartmentExternalName))
+clinics <- c(
+  # Cohort 1
+  all_clinics[40],
+  all_clinics[56],
+  all_clinics[45],
+
+  # Cohort 2
+  all_clinics[6],
+  all_clinics[55],
+
+  # Cohort 3
+  all_clinics[1],
+  all_clinics[2],
+  all_clinics[11]
+)
+```
+
+
+```{r}
+data <- data %>% 
+  filter(DepartmentExternalName %in% clinics) %>%
+  filter(IndexVisit == 1)
+```
+# Patients per clinic
+
+```{r}
+data %>% 
+  select(DepartmentExternalName) %>%
+  tbl_summary()
+```
+
+# Providers
+## Number of providers per clinic
+- Cannot distinguish between physician, NP, APP, etc. with current data
+```{r}
+data %>%
+  group_by(DepartmentExternalName) %>%
+  summarise(distinct_npis = n_distinct(ProviderNpi)) %>%
+  gt::gt()
+```
+
+## Range of number of providers
+```{r}
+data %>%
+  group_by(DepartmentExternalName) %>%
+  summarise(distinct_npis = n_distinct(ProviderNpi)) %>%
+  ungroup() %>%
+  select(distinct_npis) %>%
+  tbl_summary(
+    type = list(distinct_npis ~ "continuous2"),
+    statistic = all_continuous() ~ c("{median} ({p25}, {p75})", "{min}, {max}"),
+    missing = "no")
+```
+
+# Insurance mix
+```{r}
+data %>%
+  select(Insurance) %>%
+  tbl_summary()
+```
+
+## Range of percentage of medicaid
+```{r}
+left_join(
+# Count of patients per clinic
+data %>%
+  group_by(DepartmentExternalName) %>%
+  count() %>%
+  rename("total_pts" = n),
+
+# Count of patients on medicaid
+data %>%
+  filter(Insurance == "Medicaid") %>%
+  group_by(DepartmentExternalName) %>%
+  count() %>%
+  rename("n_medicaid_pts" = n),
+by = "DepartmentExternalName"
+) %>%
+  ungroup() %>%
+  mutate("percent_medicaid" = n_medicaid_pts / total_pts * 100) %>%
+  select(percent_medicaid) %>%
+  tbl_summary(
+    type = list(percent_medicaid ~ "continuous2"),
+    statistic = all_continuous() ~ c("{median} ({p25}, {p75})", "{min}, {max}"),
+    missing = "no")
+```
+
+# Age
+```{r}
+data %<>%
+  mutate(age_cat = ifelse(Age >= 18 & Age <= 64, "18-64", ">= 65"))
+
+data %>% 
+  select(age_cat) %>%
+  tbl_summary()
+```
+
+## Range of percentage of Age >=18 & Age <= 64 across included clinics
+```{r}
+left_join(
+# Count of patients per clinic
+data %>%
+  group_by(DepartmentExternalName) %>%
+  count() %>%
+  rename("total_pts" = n),
+
+# Count of patients on medicaid
+data %>%
+  filter(age_cat == "18-64") %>%
+  group_by(DepartmentExternalName) %>%
+  count() %>%
+  rename("n_18_64_pts" = n),
+by = "DepartmentExternalName"
+) %>%
+  ungroup() %>%
+  mutate("percent_18_64" = n_18_64_pts / total_pts * 100) %>%
+  select(percent_18_64) %>%
+  tbl_summary(
+    type = list(percent_18_64 ~ "continuous2"),
+    statistic = all_continuous() ~ c("{median} ({p25}, {p75})", "{min}, {max}"),
+    missing = "no")
+```
+
+## Range of percentage of Age >65 across included clinics
+```{r}
+left_join(
+# Count of patients per clinic
+data %>%
+  group_by(DepartmentExternalName) %>%
+  count() %>%
+  rename("total_pts" = n),
+
+# Count of patients on medicaid
+data %>%
+  filter(age_cat != "18-64") %>%
+  group_by(DepartmentExternalName) %>%
+  count() %>%
+  rename("n_65_plus_pts" = n),
+by = "DepartmentExternalName"
+) %>%
+  ungroup() %>%
+  mutate("percent_65_plus" = n_65_plus_pts / total_pts * 100) %>%
+  select(percent_65_plus) %>%
+  tbl_summary(
+    type = list(percent_65_plus ~ "continuous2"),
+    statistic = all_continuous() ~ c("{median} ({p25}, {p75})", "{min}, {max}"),
+    missing = "no")
+```
+
+# Gender
+```{r}
+data %>%
+  select(Sex) %>%
+  tbl_summary()
+```
+
+## Range of percentage of female across included clinics
+```{r}
+left_join(
+# Count of patients per clinic
+data %>%
+  group_by(DepartmentExternalName) %>%
+  count() %>%
+  rename("total_pts" = n),
+
+# Count of patients on medicaid
+data %>%
+  filter(Sex == "Female") %>%
+  group_by(DepartmentExternalName) %>%
+  count() %>%
+  rename("n_female_pts" = n),
+by = "DepartmentExternalName"
+) %>%
+  ungroup() %>%
+  mutate("percent_female" = n_female_pts / total_pts * 100) %>%
+  select(percent_female) %>%
+  tbl_summary(
+    type = list(percent_female ~ "continuous2"),
+    statistic = all_continuous() ~ c("{median} ({p25}, {p75})", "{min}, {max}"),
+    missing = "no")
+```
+
+# Race
+```{r}
+data %>%
+  select(Race) %>%
+  mutate(Race = ifelse(Race == "White or Caucasian", 
+                       "White or Caucasian",
+                       ifelse(Race == "Black or African American", 
+                              "Black or African American",
+                              "Other"))) %>%
+  tbl_summary(missing = "no")
+```
+
+# Ethnicity
+```{r}
+data %>%
+  select(Ethnicity) %>%
+  tbl_summary(missing = "no")
+```
+
+## Range of percentage of Hispanic across included clinics
+```{r}
+left_join(
+# Count of patients per clinic
+data %>%
+  group_by(DepartmentExternalName) %>%
+  count() %>%
+  rename("total_pts" = n),
+
+# Count of patients on medicaid
+data %>%
+  filter(Ethnicity == "Hispanic, Latino/a, or Spanish Origin") %>%
+  group_by(DepartmentExternalName) %>%
+  count() %>%
+  rename("n_hispanic_pts" = n),
+by = "DepartmentExternalName"
+) %>%
+  ungroup() %>%
+  mutate("percent_hispanic" = n_hispanic_pts / total_pts * 100) %>%
+  select(percent_hispanic) %>%
+  tbl_summary(
+    type = list(percent_hispanic ~ "continuous2"),
+    statistic = all_continuous() ~ c("{median} ({p25}, {p75})", "{min}, {max}"),
+    missing = "no")
+```
+
+# Diabetes
+```{r}
+data %>%
+  select("Type 2 Diabetes") %>%
+  tbl_summary()
+```
+
+## Range of percentage of diabetes patients across included clinics
+```{r}
+left_join(
+# Count of patients per clinic
+data %>%
+  group_by(DepartmentExternalName) %>%
+  count() %>%
+  rename("total_pts" = n),
+
+# Count of patients on medicaid
+data %>%
+  filter(`Type 2 Diabetes` == 1) %>%
+  group_by(DepartmentExternalName) %>%
+  count() %>%
+  rename("n_diabetes_pts" = n),
+by = "DepartmentExternalName"
+) %>%
+  ungroup() %>%
+  mutate("percent_diabetes" = n_diabetes_pts / total_pts * 100) %>%
+  select(percent_diabetes) %>%
+  tbl_summary(
+    type = list(percent_diabetes ~ "continuous2"),
+    statistic = all_continuous() ~ c("{median} ({p25}, {p75})", "{min}, {max}"),
+    missing = "no")
+```
+
+# A1C
+```{r}
+data %>%
+  filter(`Type 2 Diabetes` == 1) %>%
+  select(A1C) %>%
+  tbl_summary()
+```
+
+# Percent of T2D patients with A1C >= 9
+```{r}
+data %>%
+  mutate(t2d_and_a1c_9 = ifelse(`Type 2 Diabetes` == 1 & A1C >= 9, 1, 0))
+   %>%
+  select(t2d_and_a1c_9) %>%
+  tbl_summary()
+
+```
+
+```{r}
+left_join(
+# Count of patients per clinic
+data %>%
+  group_by(DepartmentExternalName) %>%
+  count() %>%
+  rename("total_pts" = n),
+
+# Count of patients on medicaid
+data %>%
+  mutate(t2d_and_a1c_9 = ifelse(`Type 2 Diabetes` == 1 & A1C >= 9, 1, 0)) %>%
+  filter(t2d_and_a1c_9 == 1) %>%
+  group_by(DepartmentExternalName) %>%
+  count() %>%
+  rename("n_t2d_and_a1c_9_pts" = n),
+by = "DepartmentExternalName"
+) %>%
+  ungroup() %>%
+  mutate("percent_t2d_and_a1c_9_" = n_t2d_and_a1c_9_pts / total_pts * 100) %>%
+  select(percent_t2d_and_a1c_9_) %>%
+  tbl_summary(
+    type = list(percent_t2d_and_a1c_9_ ~ "continuous2"),
+    statistic = all_continuous() ~ c("{median} ({p25}, {p75})", "{min}, {max}"),
+    missing = "no")
+```
